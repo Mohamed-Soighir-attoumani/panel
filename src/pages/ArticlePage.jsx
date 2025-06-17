@@ -59,7 +59,7 @@ const ArticlePage = () => {
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Image preview
+  // Aperçu image
   useEffect(() => {
     if (!image) {
       setPreviewUrl(null);
@@ -73,7 +73,7 @@ const ArticlePage = () => {
     reader.readAsDataURL(image);
   }, [image]);
 
-  // Auto-clear messages
+  // Effacement automatique des messages
   useEffect(() => {
     const timer = setTimeout(() => {
       setSuccessMessage("");
@@ -97,9 +97,13 @@ const ArticlePage = () => {
 
     try {
       setIsSubmitting(true);
-      await axios.post("http://localhost:4000/api/articles", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      await axios.post(
+        "https://backend-admin-tygd.onrender.com/api/articles",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        }
+      );
 
       setSuccessMessage("✅ Article créé avec succès.");
       setTitle("");

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import { API_URL } from "../config"; // ajuste le chemin si besoin
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
@@ -16,7 +17,7 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/articles");
+      const res = await axios.get(`${API_URL}/api/articles`);
       setArticles(res.data);
     } catch (err) {
       console.error("Erreur chargement articles :", err);
@@ -40,13 +41,9 @@ const ArticleListPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(
-        `http://localhost:4000/api/articles/${editingArticle._id}`,
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
+      await axios.put(`${API_URL}/api/articles/${editingArticle._id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       setSuccessMsg("✅ Article modifié avec succès.");
       resetForm();
       fetchArticles();
@@ -59,7 +56,7 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await axios.delete(`http://localhost:4000/api/articles/${id}`);
+      await axios.delete(`${API_URL}/api/articles/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
@@ -144,7 +141,7 @@ const ArticleListPage = () => {
 
             {article.imageUrl && (
               <img
-                src={`http://localhost:4000${article.imageUrl}`}
+                src={`${API_URL}${article.imageUrl}`}
                 alt="article"
                 className="h-40 w-full object-cover rounded border mb-3"
               />

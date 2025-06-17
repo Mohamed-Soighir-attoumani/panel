@@ -13,7 +13,7 @@ const IncidentsChart = () => {
 
   const fetchIncidents = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/incidents");
+      const res = await axios.get("https://backend-admin-tygd.onrender.com/api/incidents");
 
       // Regrouper les incidents par mois
       const incidentsByMonth = Array(12).fill(0); // index 0 = janvier, 11 = décembre

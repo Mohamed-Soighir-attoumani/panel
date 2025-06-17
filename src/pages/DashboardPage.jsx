@@ -3,8 +3,7 @@ import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
 import { Chart as ChartJS } from "chart.js/auto";
 import IncidentsChart from "../components/IncidentsChart";
-
-const API_BASE = "https://backend-admin-tygd.onrender.com";
+import { API_URL } from "../config"; // ← Lien avec le backend
 
 const DashboardPage = () => {
   const [incidents, setIncidents] = useState([]);
@@ -16,13 +15,13 @@ const DashboardPage = () => {
 
   const fetchData = async () => {
     try {
-      const incidentRes = await axios.get(`${API_BASE}/api/incidents?period=${period}`);
+      const incidentRes = await axios.get(`${API_URL}/api/incidents?period=${period}`);
       const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
 
-      const notifRes = await axios.get(`${API_BASE}/api/notifications`);
+      const notifRes = await axios.get(`${API_URL}/api/notifications`);
       const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
 
-      const totalRes = await axios.get(`${API_BASE}/api/incidents/count?period=${period}`);
+      const totalRes = await axios.get(`${API_URL}/api/incidents/count?period=${period}`);
       const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
@@ -48,7 +47,7 @@ const DashboardPage = () => {
 
   const fetchDeviceCount = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/devices/count`);
+      const res = await axios.get(`${API_URL}/api/devices/count`);
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
       } else {

@@ -4,6 +4,8 @@ import { Line, Bar } from "react-chartjs-2";
 import { Chart as ChartJS } from "chart.js/auto";
 import IncidentsChart from "../components/IncidentsChart";
 
+const API_BASE = "https://backend-admin-tygd.onrender.com";
+
 const DashboardPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -14,13 +16,13 @@ const DashboardPage = () => {
 
   const fetchData = async () => {
     try {
-      const incidentRes = await axios.get(`http://localhost:4000/api/incidents?period=${period}`);
+      const incidentRes = await axios.get(`${API_BASE}/api/incidents?period=${period}`);
       const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
 
-      const notifRes = await axios.get(`http://localhost:4000/api/notifications?period=${period}`);
+      const notifRes = await axios.get(`${API_BASE}/api/notifications`);
       const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
 
-      const totalRes = await axios.get(`http://localhost:4000/api/incidents/count?period=${period}`);
+      const totalRes = await axios.get(`${API_BASE}/api/incidents/count?period=${period}`);
       const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
@@ -30,7 +32,7 @@ const DashboardPage = () => {
       setActivity([
         ...realIncidents.slice(0, 3).map(inc => ({
           type: "incident",
-          text: `Incident \"${inc.type}\" signalé`,
+          text: `Incident "${inc.type || 'Inconnu'}" signalé`,
           time: inc.createdAt ? new Date(inc.createdAt).toLocaleString() : "Date inconnue"
         })),
         ...realNotifications.slice(0, 3).map(notif => ({
@@ -46,7 +48,7 @@ const DashboardPage = () => {
 
   const fetchDeviceCount = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/devices/count");
+      const res = await axios.get(`${API_BASE}/api/devices/count`);
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
       } else {
@@ -142,7 +144,6 @@ const DashboardPage = () => {
 
   return (
     <div className="p-6">
-      {/* Titre et contrôles alignés */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <h1 className="text-3xl font-bold">📊 Tableau de bord</h1>
         <div className="flex items-center gap-4">
@@ -164,7 +165,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* KPI */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         <KpiCard icon="🚨" label="Incidents EN COURS" value={incidents.filter(i => i.status === "En cours").length} color="text-red-600" />
         <KpiCard icon="✅" label="Incidents RÉSOLUS" value={incidents.filter(i => i.status === "Résolu").length} color="text-green-600" />
@@ -173,10 +173,8 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      {/* IncidentsChart */}
       <IncidentsChart />
 
-      {/* Graphiques */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-4 shadow rounded col-span-1 xl:col-span-2">
           <h3 className="text-xl font-semibold mb-4">📈 Incidents au Fil du Temps</h3>
@@ -201,7 +199,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* Timeline */}
       <div className="bg-white p-4 shadow rounded">
         <h3 className="text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

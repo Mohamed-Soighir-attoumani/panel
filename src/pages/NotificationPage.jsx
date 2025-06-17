@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-
-const API_URL = "https://backend-admin-tygd.onrender.com/api/notifications";
+import { API_URL } from "../config"; // 🔗 Import de l'URL depuis config.js
 
 const NotificationPage = () => {
   const [title, setTitle] = useState("");
@@ -11,13 +10,15 @@ const NotificationPage = () => {
   const [feedback, setFeedback] = useState({ type: "", message: "" });
   const [loading, setLoading] = useState(false);
 
+  const NOTIF_ENDPOINT = `${API_URL}/api/notifications`;
+
   useEffect(() => {
     fetchNotifications();
   }, []);
 
   const fetchNotifications = async () => {
     try {
-      const res = await axios.get(API_URL);
+      const res = await axios.get(NOTIF_ENDPOINT);
       setNotifications(res.data);
     } catch (err) {
       console.error("Erreur chargement :", err);
@@ -31,10 +32,10 @@ const NotificationPage = () => {
 
     try {
       if (editingId) {
-        await axios.patch(`${API_URL}/${editingId}`, { title, message });
+        await axios.patch(`${NOTIF_ENDPOINT}/${editingId}`, { title, message });
         setFeedback({ type: "success", message: "Notification modifiée avec succès !" });
       } else {
-        await axios.post(API_URL, { title, message });
+        await axios.post(NOTIF_ENDPOINT, { title, message });
         setFeedback({ type: "success", message: "Notification envoyée avec succès !" });
       }
 
@@ -61,7 +62,7 @@ const NotificationPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cette notification ?")) return;
     try {
-      await axios.delete(`${API_URL}/${id}`);
+      await axios.delete(`${NOTIF_ENDPOINT}/${id}`);
       setFeedback({ type: "success", message: "Notification supprimée." });
       fetchNotifications();
     } catch (err) {

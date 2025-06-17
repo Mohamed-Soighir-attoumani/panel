@@ -2,10 +2,11 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
+import { API_URL } from "../config"; 
 
 const ProjectPage = () => {
   const [name, setName] = useState("");
-  const [description, setDescription] = useState(""); // HTML généré par ReactQuill
+  const [description, setDescription] = useState(""); 
   const [image, setImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
@@ -36,7 +37,7 @@ const ProjectPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await axios.post("http://localhost:4000/api/projects", formData, {
+      await axios.post(`${API_URL}/api/projects`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 

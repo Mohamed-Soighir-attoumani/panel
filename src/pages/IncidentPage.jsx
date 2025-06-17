@@ -1,10 +1,9 @@
-// ✅ Version Améliorée : IncidentPage.jsx avec filtres + carte globale + notification sonore
-
 import L from "leaflet";
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
+import { API_URL } from "../config"; // 🔗 Lien avec backend via config.js
 
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
@@ -91,7 +90,7 @@ const IncidentPage = () => {
 
   const fetchIncidents = async () => {
     try {
-      const response = await axios.get("https://backend-admin-tygd.onrender.com/api/incidents", {
+      const response = await axios.get(`${API_URL}/api/incidents`, {
         params: { period: periodFilter },
       });
       let data = [...response.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -120,7 +119,7 @@ const IncidentPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      await axios.delete(`https://backend-admin-tygd.onrender.com/api/incidents/${id}`);
+      await axios.delete(`${API_URL}/api/incidents/${id}`);
       fetchIncidents();
     } catch (error) {
       console.error("Erreur suppression :", error);
@@ -145,7 +144,7 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      await axios.put(`https://backend-admin-tygd.onrender.com/api/incidents/${editIncidentId}`,
+      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`,
         editedIncident,
         { headers: { "Content-Type": "application/json" } }
       );

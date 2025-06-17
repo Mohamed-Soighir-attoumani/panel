@@ -3,6 +3,7 @@ import axios from "axios";
 import { Link } from "react-router-dom";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
+import { API_URL } from "../config"; // ← adapte le chemin selon ton projet
 
 const quillModules = {
   toolbar: [
@@ -41,10 +42,7 @@ const FormMessage = ({ type, message }) => {
       : "bg-red-100 text-red-700";
 
   return (
-    <div
-      className={`${colorClass} px-4 py-2 rounded mb-4 animate-fadeIn`}
-      role="alert"
-    >
+    <div className={`${colorClass} px-4 py-2 rounded mb-4 animate-fadeIn`} role="alert">
       {message}
     </div>
   );
@@ -97,13 +95,9 @@ const ArticlePage = () => {
 
     try {
       setIsSubmitting(true);
-      await axios.post(
-        "https://backend-admin-tygd.onrender.com/api/articles",
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
+      await axios.post(`${API_URL}/api/articles`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
       setSuccessMessage("✅ Article créé avec succès.");
       setTitle("");
@@ -120,22 +114,15 @@ const ArticlePage = () => {
 
   return (
     <div className="max-w-3xl mx-auto p-6 bg-white rounded-xl shadow-lg">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">
-        📝 Créer un nouvel article
-      </h1>
+      <h1 className="text-3xl font-bold text-gray-800 mb-6">📝 Créer un nouvel article</h1>
 
-      {successMessage && (
-        <FormMessage type="success" message={successMessage} />
-      )}
+      {successMessage && <FormMessage type="success" message={successMessage} />}
       {errorMessage && <FormMessage type="error" message={errorMessage} />}
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Titre */}
         <div>
-          <label
-            htmlFor="title"
-            className="block text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="title" className="block text-sm font-medium text-gray-700">
             Titre <span className="text-red-500">*</span>
           </label>
           <input
@@ -150,10 +137,7 @@ const ArticlePage = () => {
 
         {/* Contenu */}
         <div>
-          <label
-            htmlFor="content"
-            className="block text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="content" className="block text-sm font-medium text-gray-700">
             Contenu <span className="text-red-500">*</span>
           </label>
           <ReactQuill
@@ -168,10 +152,7 @@ const ArticlePage = () => {
 
         {/* Image */}
         <div>
-          <label
-            htmlFor="image"
-            className="block text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="image" className="block text-sm font-medium text-gray-700">
             Image (optionnelle)
           </label>
           <input
@@ -196,9 +177,7 @@ const ArticlePage = () => {
           disabled={isSubmitting}
           aria-label="Publier l'article"
           className={`w-full p-3 text-white rounded transition ${
-            isSubmitting
-              ? "bg-blue-300 cursor-not-allowed"
-              : "bg-blue-600 hover:bg-blue-700"
+            isSubmitting ? "bg-blue-300 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
           }`}
         >
           {isSubmitting ? "⏳ Publication en cours..." : "📤 Publier l'article"}

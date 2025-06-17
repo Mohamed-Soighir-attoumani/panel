@@ -10,7 +10,7 @@ const Sidebar = () => {
   useEffect(() => {
     const fetchIncidents = async () => {
       try {
-        const res = await axios.get("http://localhost:4000/api/incidents");
+        const res = await axios.get("https://backend-admin-tygd.onrender.com/api/incidents");
         const incidentsEnCours = res.data.filter(i => i.status === "En cours");
         setHasPendingIncidents(incidentsEnCours.length > 0);
       } catch (error) {
@@ -31,9 +31,7 @@ const Sidebar = () => {
         isCollapsed ? 'w-16' : 'w-64'
       } h-[calc(100vh-64px)] fixed top-16 left-0 p-4 flex flex-col justify-between transition-all duration-300`}
     >
-      {/* Haut : bouton + menu */}
       <div>
-        {/* Toggle button à gauche */}
         <div className="flex justify-start mb-4">
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
@@ -44,7 +42,6 @@ const Sidebar = () => {
           </button>
         </div>
 
-        {/* Menu */}
         <nav className="mt-2">
           <ul className="space-y-6">
             <li>
@@ -140,7 +137,6 @@ const Sidebar = () => {
         </nav>
       </div>
 
-      {/* Bas : Bloc de présentation bénévole avec animation et lien */}
       {!isCollapsed && (
         <a
           href="https://www.facebook.com/mohamedsoighir.attoumani"

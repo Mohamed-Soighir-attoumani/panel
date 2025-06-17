@@ -61,18 +61,15 @@ const DashboardPage = () => {
   useEffect(() => {
     fetchData();
     fetchDeviceCount();
-
     const interval = setInterval(() => {
       fetchData();
       fetchDeviceCount();
     }, 30000);
-
     return () => clearInterval(interval);
   }, [period]);
 
   const groupIncidentsByMonth = () => {
     const monthMap = {};
-
     incidents.forEach(inc => {
       if (inc.createdAt) {
         const date = new Date(inc.createdAt);
@@ -80,10 +77,8 @@ const DashboardPage = () => {
         monthMap[monthLabel] = (monthMap[monthLabel] || 0) + 1;
       }
     });
-
     const sortedMonths = Object.keys(monthMap).sort();
     const counts = sortedMonths.map(month => monthMap[month]);
-
     return { labels: sortedMonths, data: counts };
   };
 
@@ -124,7 +119,7 @@ const DashboardPage = () => {
   };
 
   const KpiCard = ({ icon, label, value, color }) => (
-    <div className="bg-white p-2 sm:p-3 rounded shadow text-center hover:shadow-lg transition duration-300 text-sm sm:text-base">
+    <div className="bg-white p-3 sm:p-4 rounded shadow text-center hover:shadow-lg transition duration-300 text-sm sm:text-base">
       <div className="text-2xl sm:text-3xl mb-1">{icon}</div>
       <p className="text-gray-500 text-xs sm:text-sm">{label}</p>
       <p className={`text-xl sm:text-2xl font-bold ${color}`}>{value}</p>
@@ -142,29 +137,29 @@ const DashboardPage = () => {
   );
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-        <h1 className="text-3xl font-bold">📊 Tableau de bord</h1>
-        <div className="flex items-center gap-4">
+        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">📊 Tableau de bord</h1>
+        <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
           <label className="font-medium">📅 Période :</label>
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="border px-2 py-1 rounded"
+            className="border px-2 py-1 rounded w-full sm:w-auto"
           >
             <option value="7">7 derniers jours</option>
             <option value="30">30 derniers jours</option>
           </select>
           <button
             onClick={fetchData}
-            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
           >
             🔄 Rafraîchir
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
         <KpiCard icon="🚨" label="Incidents EN COURS" value={incidents.filter(i => i.status === "En cours").length} color="text-red-600" />
         <KpiCard icon="✅" label="Incidents RÉSOLUS" value={incidents.filter(i => i.status === "Résolu").length} color="text-green-600" />
         <KpiCard icon="📋" label="Incidents TOTAL" value={incidents.length} color="text-blue-600" />
@@ -176,7 +171,7 @@ const DashboardPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-4 shadow rounded col-span-1 xl:col-span-2">
-          <h3 className="text-xl font-semibold mb-4">📈 Incidents au Fil du Temps</h3>
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">📈 Incidents au Fil du Temps</h3>
           <Line
             data={{
               labels: dynamicChartData.labels,
@@ -193,13 +188,13 @@ const DashboardPage = () => {
         </div>
 
         <div className="bg-white p-4 shadow rounded">
-          <h3 className="text-xl font-semibold mb-4">📊 Répartition des Incidents</h3>
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">📊 Répartition des Incidents</h3>
           <Bar data={barChartData} options={chartOptions} />
         </div>
       </div>
 
       <div className="bg-white p-4 shadow rounded">
-        <h3 className="text-xl font-semibold mb-4">📜 Activité Récente</h3>
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (
           <p className="text-gray-500">Aucune activité récente.</p>
         ) : (

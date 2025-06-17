@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
+import { API_URL } from "../config"; // ✅ Import de l'URL du backend
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
@@ -18,7 +19,7 @@ const ProjectListPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/projects");
+      const res = await axios.get(`${API_URL}/api/projects`);
       setProjects(res.data);
     } catch (err) {
       console.error("Erreur chargement projets :", err);
@@ -43,7 +44,7 @@ const ProjectListPage = () => {
 
     try {
       await axios.put(
-        `http://localhost:4000/api/projects/${editingProject._id}`,
+        `${API_URL}/api/projects/${editingProject._id}`,
         formData,
         {
           headers: { "Content-Type": "multipart/form-data" },
@@ -61,7 +62,7 @@ const ProjectListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer ce projet ?")) return;
     try {
-      await axios.delete(`http://localhost:4000/api/projects/${id}`);
+      await axios.delete(`${API_URL}/api/projects/${id}`);
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
@@ -77,7 +78,6 @@ const ProjectListPage = () => {
     setImage(null);
   };
 
-  // Petite fonction pour afficher un résumé texte de la description :
   const getDescriptionSnippet = (html) => {
     const tmp = document.createElement("div");
     tmp.innerHTML = html;
@@ -151,19 +151,15 @@ const ProjectListPage = () => {
         {projects.map((project) => (
           <li key={project._id} className="p-4 bg-gray-100 rounded shadow-sm">
             <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
-
-            {/* Résumé de la description */}
             <p className="text-gray-700 mb-2">{getDescriptionSnippet(project.description)}</p>
 
-            {/* Image */}
             {project.imageUrl && (
-            <img
-                src={`http://localhost:4000${project.imageUrl}`}
+              <img
+                src={`${API_URL}${project.imageUrl}`}
                 alt="Projet"
                 className="h-40 w-full object-cover rounded border mb-3"
-            />
+              />
             )}
-
 
             <div className="flex gap-2">
               <button
@@ -186,7 +182,6 @@ const ProjectListPage = () => {
   );
 };
 
-// Options de ReactQuill
 ProjectListPage.modules = {
   toolbar: [
     [{ font: [] }],

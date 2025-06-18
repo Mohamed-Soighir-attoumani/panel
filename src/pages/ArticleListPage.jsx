@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { BASE_URL as API_URL } from '../config';
+import { BASE_URL as API_URL } from "../config"; // Assure-toi que ce fichier exporte bien BASE_URL
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
@@ -17,11 +17,13 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      const res = await axios.get(`${BASE_URL}/api/articles`);
+      console.log("🔍 Requête vers :", `${API_URL}/api/articles`);
+      const res = await axios.get(`${API_URL}/api/articles`);
       setArticles(res.data);
+      setErrorMsg(""); // réinitialise le message d'erreur s'il y en avait
     } catch (err) {
       console.error("Erreur chargement articles :", err);
-      setErrorMsg("Impossible de charger les articles.");
+      setErrorMsg("❌ Impossible de charger les articles.");
     }
   };
 
@@ -41,7 +43,7 @@ const ArticleListPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(`${BASE_URL}/api/articles/${editingArticle._id}`, formData, {
+      await axios.put(`${API_URL}/api/articles/${editingArticle._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSuccessMsg("✅ Article modifié avec succès.");
@@ -49,19 +51,19 @@ const ArticleListPage = () => {
       fetchArticles();
     } catch (err) {
       console.error(err);
-      setErrorMsg("Erreur lors de la mise à jour.");
+      setErrorMsg("❌ Erreur lors de la mise à jour.");
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await axios.delete(`${BASE_URL}/api/articles/${id}`);
+      await axios.delete(`${API_URL}/api/articles/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
       console.error(err);
-      setErrorMsg("Erreur lors de la suppression.");
+      setErrorMsg("❌ Erreur lors de la suppression.");
     }
   };
 
@@ -145,7 +147,7 @@ const ArticleListPage = () => {
 
             {article.imageUrl && (
               <img
-                src={`${BASE_URL.replace(/\/$/, "")}${article.imageUrl}`}
+                src={`${API_URL.replace(/\/$/, "")}${article.imageUrl}`}
                 alt="article"
                 className="h-40 w-full object-cover rounded border mb-3"
               />

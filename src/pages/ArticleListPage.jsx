@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { BASE_URL as API_URL } from "../config"; // Assure-toi que ce fichier exporte bien BASE_URL
+import { API_URL } from "../config"; // ← Lien correct avec le backend
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
@@ -20,7 +20,7 @@ const ArticleListPage = () => {
       console.log("🔍 Requête vers :", `${API_URL}/api/articles`);
       const res = await axios.get(`${API_URL}/api/articles`);
       setArticles(res.data);
-      setErrorMsg(""); // réinitialise le message d'erreur s'il y en avait
+      setErrorMsg(""); // Réinitialise le message d'erreur s'il y en avait
     } catch (err) {
       console.error("Erreur chargement articles :", err);
       setErrorMsg("❌ Impossible de charger les articles.");

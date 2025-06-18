@@ -182,9 +182,6 @@ const IncidentPage = () => {
         </select>
       </div>
 
-      {/* Carte globale */}
-      <GlobalIncidentMap incidents={incidents} />
-
       {/* Liste des incidents */}
       {incidents.length === 0 ? (
         <p className="text-gray-500">Aucun incident pour le moment.</p>

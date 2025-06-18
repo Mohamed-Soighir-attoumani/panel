@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { API_URL } from "../config"; // ajuste le chemin si besoin
+import { BASE_URL } from "../config"; // 🔗 Utilise BASE_URL pour charger l'image
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
@@ -17,7 +17,7 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/articles`);
+      const res = await axios.get(`${BASE_URL}/api/articles`);
       setArticles(res.data);
     } catch (err) {
       console.error("Erreur chargement articles :", err);
@@ -41,7 +41,7 @@ const ArticleListPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(`${API_URL}/api/articles/${editingArticle._id}`, formData, {
+      await axios.put(`${BASE_URL}/api/articles/${editingArticle._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSuccessMsg("✅ Article modifié avec succès.");
@@ -56,7 +56,7 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await axios.delete(`${API_URL}/api/articles/${id}`);
+      await axios.delete(`${BASE_URL}/api/articles/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
@@ -137,11 +137,15 @@ const ArticleListPage = () => {
         {articles.map((article) => (
           <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
             <h3 className="text-lg font-bold text-gray-800">{article.title}</h3>
-            <p className="text-gray-700 mb-2 truncate max-w-prose">{article.content}</p>
+
+            <div
+              className="text-gray-700 mb-2 max-w-prose"
+              dangerouslySetInnerHTML={{ __html: article.content }}
+            />
 
             {article.imageUrl && (
               <img
-                src={`${API_URL}${article.imageUrl}`}
+                src={`${BASE_URL.replace(/\/$/, "")}${article.imageUrl}`}
                 alt="article"
                 className="h-40 w-full object-cover rounded border mb-3"
               />

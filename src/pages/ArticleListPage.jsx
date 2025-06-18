@@ -17,10 +17,9 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      console.log("🔍 Requête vers :", `${API_URL}/api/articles`);
       const res = await axios.get(`${API_URL}/api/articles`);
       setArticles(res.data);
-      setErrorMsg(""); // Réinitialise le message d'erreur s'il y en avait
+      setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement articles :", err);
       setErrorMsg("❌ Impossible de charger les articles.");
@@ -72,6 +71,14 @@ const ArticleListPage = () => {
     setTitle("");
     setContent("");
     setImage(null);
+  };
+
+  // Utilitaire pour extraire un résumé texte depuis du HTML
+  const getPlainTextSnippet = (html, maxLength = 500) => {
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    const text = temp.textContent || temp.innerText || "";
+    return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
   };
 
   return (
@@ -138,12 +145,7 @@ const ArticleListPage = () => {
       <ul className="space-y-4">
         {articles.map((article) => (
           <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
-            <h3 className="text-lg font-bold text-gray-800">{article.title}</h3>
-
-            <div
-              className="text-gray-700 mb-2 max-w-prose"
-              dangerouslySetInnerHTML={{ __html: article.content }}
-            />
+            <h3 className="text-lg font-bold text-gray-800 mb-2">{article.title}</h3>
 
             {article.imageUrl && (
               <img
@@ -152,6 +154,10 @@ const ArticleListPage = () => {
                 className="h-40 w-full object-cover rounded border mb-3"
               />
             )}
+
+            <p className="text-gray-700 mb-2">
+              {getPlainTextSnippet(article.content, 500)}
+            </p>
 
             <div className="flex gap-2">
               <button

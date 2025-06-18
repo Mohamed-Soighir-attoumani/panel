@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
-import { API_URL } from "../config"; // ✅ Import de l'URL du backend
+import { API_URL } from "../config"; // ✅ Lien avec le backend
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
@@ -23,7 +23,7 @@ const ProjectListPage = () => {
       setProjects(res.data);
     } catch (err) {
       console.error("Erreur chargement projets :", err);
-      setErrorMsg("Impossible de charger les projets.");
+      setErrorMsg("❌ Impossible de charger les projets.");
     }
   };
 
@@ -43,19 +43,15 @@ const ProjectListPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(
-        `${API_URL}/api/projects/${editingProject._id}`,
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
+      await axios.put(`${API_URL}/api/projects/${editingProject._id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       setSuccessMsg("✅ Projet modifié avec succès.");
       resetForm();
       fetchProjects();
     } catch (err) {
       console.error(err);
-      setErrorMsg("Erreur lors de la mise à jour.");
+      setErrorMsg("❌ Erreur lors de la mise à jour.");
     }
   };
 
@@ -67,7 +63,7 @@ const ProjectListPage = () => {
       fetchProjects();
     } catch (err) {
       console.error(err);
-      setErrorMsg("Erreur lors de la suppression.");
+      setErrorMsg("❌ Erreur lors de la suppression.");
     }
   };
 
@@ -155,7 +151,7 @@ const ProjectListPage = () => {
 
             {project.imageUrl && (
               <img
-                src={`${API_URL}${project.imageUrl}`}
+                src={`${API_URL.replace(/\/$/, "")}${project.imageUrl}`}
                 alt="Projet"
                 className="h-40 w-full object-cover rounded border mb-3"
               />

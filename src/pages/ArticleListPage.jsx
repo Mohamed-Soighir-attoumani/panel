@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { BASE_URL } from "../config"; // 🔗 Utilise BASE_URL pour charger l'image
+import { BASE_URL as API_URL } from '../config';
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);

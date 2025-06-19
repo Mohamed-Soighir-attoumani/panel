@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
-import { API_URL } from "../config"; // ✅ Lien avec le backend
+import { API_URL } from "../config";
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
@@ -21,6 +21,7 @@ const ProjectListPage = () => {
     try {
       const res = await axios.get(`${API_URL}/api/projects`);
       setProjects(res.data);
+      setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement projets :", err);
       setErrorMsg("❌ Impossible de charger les projets.");
@@ -50,7 +51,7 @@ const ProjectListPage = () => {
       resetForm();
       fetchProjects();
     } catch (err) {
-      console.error(err);
+      console.error("Erreur mise à jour projet :", err);
       setErrorMsg("❌ Erreur lors de la mise à jour.");
     }
   };
@@ -62,7 +63,7 @@ const ProjectListPage = () => {
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
-      console.error(err);
+      console.error("Erreur suppression projet :", err);
       setErrorMsg("❌ Erreur lors de la suppression.");
     }
   };
@@ -72,13 +73,15 @@ const ProjectListPage = () => {
     setName("");
     setDescription("");
     setImage(null);
+    setSuccessMsg("");
+    setErrorMsg("");
   };
 
   const getDescriptionSnippet = (html) => {
-    const tmp = document.createElement("div");
-    tmp.innerHTML = html;
-    const text = tmp.textContent || tmp.innerText || "";
-    return text.length > 100 ? text.substring(0, 100) + "..." : text;
+    const temp = document.createElement("div");
+    temp.innerHTML = html;
+    const text = temp.textContent || temp.innerText || "";
+    return text.length > 100 ? text.slice(0, 100) + "..." : text;
   };
 
   return (
@@ -149,13 +152,15 @@ const ProjectListPage = () => {
             <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
             <p className="text-gray-700 mb-2">{getDescriptionSnippet(project.description)}</p>
 
-            {project.imageUrl && (
-              <img
-                src={`${API_URL.replace(/\/$/, "")}${project.imageUrl}`}
-                alt="Projet"
-                className="h-40 w-full object-cover rounded border mb-3"
-              />
-            )}
+            <img
+              src={
+                project.imageUrl?.startsWith("/uploads/")
+                  ? `${API_URL.replace(/\/$/, "")}${project.imageUrl}`
+                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
+              }
+              alt={`Image du projet ${project.name}`}
+              className="h-40 w-full object-cover rounded border mb-3"
+            />
 
             <div className="flex gap-2">
               <button

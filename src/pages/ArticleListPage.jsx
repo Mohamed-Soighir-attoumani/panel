@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import { API_URL } from "../config"; // ← Lien correct avec le backend
+import { API_URL } from "../config";
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
@@ -73,7 +73,6 @@ const ArticleListPage = () => {
     setImage(null);
   };
 
-  // Utilitaire pour extraire un résumé texte depuis du HTML
   const getPlainTextSnippet = (html, maxLength = 500) => {
     const temp = document.createElement("div");
     temp.innerHTML = html;
@@ -147,13 +146,15 @@ const ArticleListPage = () => {
           <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
             <h3 className="text-lg font-bold text-gray-800 mb-2">{article.title}</h3>
 
-            {article.imageUrl && (
-              <img
-                src={`${API_URL.replace(/\/$/, "")}${article.imageUrl}`}
-                alt="article"
-                className="h-40 w-full object-cover rounded border mb-3"
-              />
-            )}
+            <img
+              src={
+                article.imageUrl?.startsWith('/uploads/')
+                  ? `${API_URL.replace(/\/$/, '')}${article.imageUrl}`
+                  : 'https://via.placeholder.com/600x200.png?text=Aucune+image'
+              }
+              alt="article"
+              className="h-40 w-full object-cover rounded border mb-3"
+            />
 
             <p className="text-gray-700 mb-2">
               {getPlainTextSnippet(article.content, 500)}

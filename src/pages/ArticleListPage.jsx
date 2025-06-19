@@ -8,6 +8,7 @@ const ArticleListPage = () => {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -31,8 +32,21 @@ const ArticleListPage = () => {
     setTitle(article.title || "");
     setContent(article.content || "");
     setImage(null);
+    setImagePreview(article.imageUrl || null);
     setSuccessMsg("");
     setErrorMsg("");
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    setImage(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    } else {
+      setImagePreview(null);
+    }
   };
 
   const handleUpdate = async () => {
@@ -49,7 +63,7 @@ const ArticleListPage = () => {
       resetForm();
       fetchArticles();
     } catch (err) {
-      console.error(err);
+      console.error("Erreur mise à jour article :", err);
       setErrorMsg("❌ Erreur lors de la mise à jour.");
     }
   };
@@ -61,7 +75,7 @@ const ArticleListPage = () => {
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
-      console.error(err);
+      console.error("Erreur suppression article :", err);
       setErrorMsg("❌ Erreur lors de la suppression.");
     }
   };
@@ -71,6 +85,7 @@ const ArticleListPage = () => {
     setTitle("");
     setContent("");
     setImage(null);
+    setImagePreview(null);
   };
 
   const getPlainTextSnippet = (html, maxLength = 500) => {
@@ -118,9 +133,16 @@ const ArticleListPage = () => {
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setImage(e.target.files[0])}
+              onChange={handleImageChange}
               className="w-full"
             />
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Aperçu"
+                className="mt-3 rounded-lg border border-gray-300 max-h-64 object-cover shadow-sm"
+              />
+            )}
           </div>
 
           <div className="flex gap-3">

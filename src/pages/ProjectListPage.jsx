@@ -10,6 +10,7 @@ const ProjectListPage = () => {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -33,8 +34,21 @@ const ProjectListPage = () => {
     setName(project.name || "");
     setDescription(project.description || "");
     setImage(null);
+    setImagePreview(project.imageUrl || null);
     setSuccessMsg("");
     setErrorMsg("");
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    setImage(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    } else {
+      setImagePreview(null);
+    }
   };
 
   const handleUpdate = async () => {
@@ -73,6 +87,7 @@ const ProjectListPage = () => {
     setName("");
     setDescription("");
     setImage(null);
+    setImagePreview(null);
     setSuccessMsg("");
     setErrorMsg("");
   };
@@ -123,9 +138,16 @@ const ProjectListPage = () => {
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setImage(e.target.files[0])}
+              onChange={handleImageChange}
               className="w-full"
             />
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Aperçu"
+                className="mt-3 rounded-lg border border-gray-300 max-h-64 object-cover shadow-sm"
+              />
+            )}
           </div>
 
           <div className="flex gap-3">
@@ -150,9 +172,7 @@ const ProjectListPage = () => {
         {projects.map((project) => (
           <li key={project._id} className="p-4 bg-gray-100 rounded shadow-sm">
             <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
-            <p className="text-gray-700 mb-2">{getDescriptionSnippet(project.description)}</p>
 
-            {/* ✅ Image Cloudinary ou fallback */}
             <img
               src={
                 project.imageUrl
@@ -162,6 +182,10 @@ const ProjectListPage = () => {
               alt={`Image du projet ${project.name}`}
               className="h-40 w-full object-cover rounded border mb-3"
             />
+
+            <p className="text-gray-700 mb-2">
+              {getDescriptionSnippet(project.description)}
+            </p>
 
             <div className="flex gap-2">
               <button

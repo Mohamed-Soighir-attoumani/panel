@@ -148,11 +148,11 @@ const ArticleListPage = () => {
 
             <img
               src={
-                article.imageUrl?.startsWith('/uploads/')
-                  ? `${API_URL.replace(/\/$/, '')}${article.imageUrl}`
-                  : 'https://via.placeholder.com/600x200.png?text=Aucune+image'
+                article.imageUrl
+                  ? article.imageUrl
+                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
               }
-              alt="article"
+              alt={`Image de l'article ${article.title}`}
               className="h-40 w-full object-cover rounded border mb-3"
             />
 

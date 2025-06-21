@@ -9,7 +9,7 @@ const Header = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
-  const [adminInfo, setAdminInfo] = useState({ nom: '', prenom: '', email: '' });
+  const [adminInfo, setAdminInfo] = useState({ nom: '', prenom: '', email: '', photo: '' });
 
   const pageTitle =
     location.pathname === "/dashboard"
@@ -33,7 +33,7 @@ const Header = () => {
     }
   }, []);
 
-  // Ferme le menu si clic en dehors
+  // Fermer le menu si clic en dehors
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
@@ -77,14 +77,18 @@ const Header = () => {
             <div className="relative flex flex-col items-center space-y-1">
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
-                className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-90 transition"
+                className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
                 title="Profil administrateur"
               >
-                A
+                <img
+                  src={adminInfo.photo || require('../assets/images/securidem-logo.png')}
+                  alt="Profil"
+                  className="h-full w-full object-cover"
+                />
               </div>
               <span className="text-xs text-gray-700">Mairie de Dembeni</span>
 
-              {/* Menu profil */}
+              {/* Menu Profil */}
               <AnimatePresence>
                 {profileMenuOpen && (
                   <motion.div
@@ -131,7 +135,6 @@ const Header = () => {
                       ⚙️ Paramètres
                     </Link>
 
-                    {/* Déconnexion tout en bas */}
                     <button
                       onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-200"

@@ -9,12 +9,7 @@ const Header = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
-  const [adminInfo, setAdminInfo] = useState({
-    nom: '',
-    prenom: '',
-    email: '',
-    photo: ''
-  });
+  const [adminInfo, setAdminInfo] = useState({ nom: '', prenom: '', email: '', photo: '' });
 
   const pageTitle =
     location.pathname === "/dashboard"
@@ -38,7 +33,6 @@ const Header = () => {
     }
   }, []);
 
-  // Ferme le menu si clic en dehors
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
@@ -56,10 +50,10 @@ const Header = () => {
   return (
     <>
       {/* Header principal */}
-      <div className="fixed top-0 left-0 w-full z-50 shadow-md">
+      <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black relative">
           <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
-            {/* Gauche : Logo et menu */}
+            {/* Logo + menu burger */}
             <div className="flex items-center space-x-4">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -74,12 +68,12 @@ const Header = () => {
               />
             </div>
 
-            {/* Titre au centre */}
-            <h1 className="absolute left-1/2 transform -translate-x-1/2 text-xl font-bold uppercase tracking-wide text-gray-700">
+            {/* Titre centré */}
+            <h1 className="absolute left-1/2 transform -translate-x-1/2 text-xl font-bold tracking-wide uppercase text-gray-700">
               {pageTitle}
             </h1>
 
-            {/* Droite : profil */}
+            {/* Profil */}
             <div className="relative flex flex-col items-center space-y-1">
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
@@ -94,6 +88,7 @@ const Header = () => {
               </div>
               <span className="text-xs text-gray-700">Mairie de Dembeni</span>
 
+              {/* Menu Profil */}
               <AnimatePresence>
                 {profileMenuOpen && (
                   <motion.div
@@ -111,35 +106,18 @@ const Header = () => {
                       <p className="text-xs text-gray-500">{adminInfo.email}</p>
                     </div>
 
-                    <Link
-                      to="/profil"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
+                    <Link to="/profil" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
                       🔄 Modifier les informations
                     </Link>
-                    <Link
-                      to="/changer-photo"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
+                    <Link to="/changer-photo" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
                       🖼️ Changer la photo
                     </Link>
-                    <Link
-                      to="/changer-mot-de-passe"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
+                    <Link to="/changer-mot-de-passe" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
                       🔒 Changer le mot de passe
                     </Link>
-                    <Link
-                      to="/parametres"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
+                    <Link to="/parametres" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
                       ⚙️ Paramètres
                     </Link>
-
                     <button
                       onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-200"
@@ -154,7 +132,7 @@ const Header = () => {
         </header>
       </div>
 
-      {/* Bande d’urgence si incident */}
+      {/* Bande urgence sous le header */}
       <AnimatePresence>
         {location.pathname.startsWith("/incident") && (
           <motion.div
@@ -163,7 +141,7 @@ const Header = () => {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.5 }}
-            className="fixed top-[64px] z-40 w-full bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
+            className="fixed top-[64px] z-10 w-full bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
           >
             <div className="px-4 py-2 mt-4">
               <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
@@ -186,12 +164,9 @@ const Header = () => {
             animate={{ x: 0 }}
             exit={{ x: "-100%" }}
             transition={{ duration: 0.3 }}
-            className="fixed top-[64px] left-0 w-52 h-[calc(100vh-64px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
+            className="fixed top-16 left-0 w-52 h-[calc(100vh-64px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
           >
-            <p className="mb-4 font-bold">📱 Menu mobile</p>
-            <Link to="/dashboard" className="block text-sm py-2 hover:text-blue-300">🏠 Tableau de bord</Link>
-            <Link to="/incident" className="block text-sm py-2 hover:text-blue-300">🚨 Incidents</Link>
-            <Link to="/actualites" className="block text-sm py-2 hover:text-blue-300">📰 Actualités</Link>
+            <p className="mb-4 font-bold">Menu mobile (à compléter)</p>
           </motion.div>
         )}
       </AnimatePresence>

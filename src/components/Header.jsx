@@ -6,6 +6,7 @@ import { LogOut, Menu } from 'lucide-react';
 const Header = () => {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const pageTitle =
     location.pathname === "/dashboard"
@@ -22,7 +23,7 @@ const Header = () => {
     <>
       {/* Header principal en haut */}
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
-        <header className="bg-white border-b border-gray-200 text-black">
+        <header className="bg-white border-b border-gray-200 text-black relative">
           <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
             {/* Gauche : Logo + Menu burger */}
             <div className="flex items-center space-x-4">
@@ -44,13 +45,16 @@ const Header = () => {
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar cliquable + déconnexion */}
-            <div className="flex items-center space-x-4">
-              <Link to="/profil" title="Voir le profil administrateur">
-                <div className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-90 transition">
-                  A
-                </div>
-              </Link>
+            {/* Droite : avatar + déconnexion */}
+            <div className="relative flex items-center space-x-4">
+              <div
+                onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+                className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-90 transition"
+                title="Profil administrateur"
+              >
+                A
+              </div>
+
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-2 bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition"
@@ -58,12 +62,47 @@ const Header = () => {
                 <LogOut className="w-4 h-4" />
                 <span className="text-sm hidden sm:inline">Déconnexion</span>
               </button>
+
+              {/* Menu déroulant du profil */}
+              <AnimatePresence>
+                {profileMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute top-14 right-0 w-56 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
+                  >
+                    <Link
+                      to="/changer-mot-de-passe"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
+                      🔒 Modifier le mot de passe
+                    </Link>
+                    <Link
+                      to="/utilisateurs"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
+                      👥 Gérer les utilisateurs
+                    </Link>
+                    <Link
+                      to="/settings"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
+                      ⚙️ Paramètres
+                    </Link>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </header>
       </div>
 
-      {/* Bande urgence en fixed, sous le header */}
+      {/* Bande urgence */}
       <AnimatePresence>
         {location.pathname.startsWith("/incident") && (
           <motion.div

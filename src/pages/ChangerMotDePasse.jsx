@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-const ChangePassword = () => {
+const ChangerMotDePasse = () => {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,27 +26,28 @@ const ChangePassword = () => {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/change-password', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ oldPassword, newPassword })
+        body: JSON.stringify({ oldPassword, newPassword }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : {};
 
       if (!response.ok) {
         throw new Error(data.message || 'Erreur lors de la mise à jour.');
       }
 
-      toast.success('✅ Mot de passe modifié avec succès.');
+      toast.success(data.message || '✅ Mot de passe modifié avec succès.');
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      toast.error(error.message);
+      toast.error(error.message || 'Erreur inconnue.');
     }
   };
 
@@ -59,7 +60,6 @@ const ChangePassword = () => {
         </h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-
           {/* Ancien mot de passe */}
           <div>
             <label className="block text-sm font-medium text-gray-700">Ancien mot de passe</label>
@@ -137,4 +137,4 @@ const ChangePassword = () => {
   );
 };
 
-export default ChangePassword;
+export default ChangerMotDePasse;

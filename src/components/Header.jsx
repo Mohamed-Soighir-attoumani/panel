@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, Menu } from 'lucide-react';
 
@@ -44,14 +44,13 @@ const Header = () => {
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar + déconnexion */}
+            {/* Droite : avatar cliquable + déconnexion */}
             <div className="flex items-center space-x-4">
-              <div
-                className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white"
-                title="Administrateur"
-              >
-                A
-              </div>
+              <Link to="/profil" title="Voir le profil administrateur">
+                <div className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-90 transition">
+                  A
+                </div>
+              </Link>
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-2 bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition"

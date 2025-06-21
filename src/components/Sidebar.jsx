@@ -25,7 +25,7 @@ const Sidebar = () => {
   const isActive = (path) => location.pathname.startsWith(path);
 
   return (
-    <div className="bg-gray-900 text-white w-64 h-[calc(100vh-64px)] fixed top-16 left-0 p-4 flex flex-col justify-between">
+    <div className="bg-gray-900 text-white w-64 h-[calc(100vh-64px)] fixed top-16 left-0 p-4 pt-6 flex flex-col justify-between">
       <div>
         <nav className="mt-2">
           <ul className="space-y-6">

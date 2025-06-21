@@ -1,8 +1,11 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
 import LoginPage from "./pages/LoginPage";
-import AdminProfile from './pages/AdminProfile';
-import ChangerMotDePasse from './pages/ChangerMotDePasse';
+import AdminProfile from "./pages/AdminProfile";
+import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
 import NotificationPage from "./pages/NotificationPage";
@@ -14,25 +17,29 @@ import Layout from "./components/Layout";
 
 const App = () => {
   return (
-    <Routes>
-      {/* Route sans layout */}
-      <Route path="/" element={<Navigate to="/login" />} />
-      <Route path="/login" element={<LoginPage />} />
+    <>
+      <Routes>
+        {/* Route sans layout */}
+        <Route path="/" element={<Navigate to="/login" />} />
+        <Route path="/login" element={<LoginPage />} />
 
-      {/* Routes avec layout */}
-      <Route element={<Layout />}>
-        <Route path="/profil" element={<AdminProfile />} />
-        <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/incidents" element={<IncidentPage />} />
-        <Route path="/notifications" element={<NotificationPage />} />
-        <Route path="/articles" element={<ArticlePage />} />
-        <Route path="/articles/liste" element={<ArticleListPage />} />
-        <Route path="/projects" element={<ProjectPage />} />
-        <Route path="/projects/liste" element={<ProjectListPage />} />
+        {/* Routes avec layout */}
+        <Route element={<Layout />}>
+          <Route path="/profil" element={<AdminProfile />} />
+          <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/incidents" element={<IncidentPage />} />
+          <Route path="/notifications" element={<NotificationPage />} />
+          <Route path="/articles" element={<ArticlePage />} />
+          <Route path="/articles/liste" element={<ArticleListPage />} />
+          <Route path="/projects" element={<ProjectPage />} />
+          <Route path="/projects/liste" element={<ProjectListPage />} />
+        </Route>
+      </Routes>
 
-      </Route>
-    </Routes>
+      {/* ✅ Affiche les notifications toast */}
+      <ToastContainer />
+    </>
   );
 };
 

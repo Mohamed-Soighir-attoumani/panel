@@ -137,7 +137,7 @@ const DashboardPage = () => {
   );
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="mt-20 p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">📊 Tableau de bord</h1>
         <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">

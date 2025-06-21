@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, Menu } from 'lucide-react';
@@ -7,6 +7,8 @@ const Header = () => {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+
   const [adminInfo, setAdminInfo] = useState({ nom: '', prenom: '', email: '' });
 
   const pageTitle =
@@ -21,7 +23,6 @@ const Header = () => {
   };
 
   useEffect(() => {
-    // 🔐 Exemple : récupérer infos admin depuis le localStorage (ou API)
     const stored = localStorage.getItem('admin');
     if (stored) {
       try {
@@ -32,13 +33,27 @@ const Header = () => {
     }
   }, []);
 
+  // 👇 Ferme le menu si clic en dehors
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+    if (profileMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [profileMenuOpen]);
+
   return (
     <>
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black relative">
           <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
-
-            {/* Logo + menu burger */}
+            {/* Logo + burger */}
             <div className="flex items-center space-x-4">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -53,12 +68,12 @@ const Header = () => {
               />
             </div>
 
-            {/* Titre */}
+            {/* Titre centré */}
             <h1 className="absolute left-1/2 transform -translate-x-1/2 text-xl font-bold tracking-wide uppercase text-gray-700">
               {pageTitle}
             </h1>
 
-            {/* Avatar + déconnexion + menu profil */}
+            {/* Avatar + déconnexion + menu */}
             <div className="relative flex items-center space-x-4">
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
@@ -76,17 +91,18 @@ const Header = () => {
                 <span className="text-sm hidden sm:inline">Déconnexion</span>
               </button>
 
-              {/* Menu déroulant profil */}
+              {/* ⬇️ Menu Profil */}
               <AnimatePresence>
                 {profileMenuOpen && (
                   <motion.div
+                    ref={profileMenuRef}
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
                     className="absolute top-14 right-0 w-64 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
                   >
-                    {/* Infos de l'admin */}
+                    {/* Infos */}
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
                         {adminInfo.prenom} {adminInfo.nom}
@@ -94,7 +110,7 @@ const Header = () => {
                       <p className="text-xs text-gray-500">{adminInfo.email}</p>
                     </div>
 
-                    {/* Liens */}
+                    {/* Lien vers les options */}
                     <Link
                       to="/profil"
                       className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
@@ -122,6 +138,13 @@ const Header = () => {
                       onClick={() => setProfileMenuOpen(false)}
                     >
                       🔐 Déconnexion de tous les appareils
+                    </Link>
+                    <Link
+                      to="/parametres"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
+                      ⚙️ Paramètres
                     </Link>
                   </motion.div>
                 )}

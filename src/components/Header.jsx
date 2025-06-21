@@ -74,7 +74,7 @@ const Header = () => {
             </h1>
 
             {/* Profil */}
-            <div className="relative flex items-center space-x-4">
+            <div className="relative flex flex-col items-center space-y-1">
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
                 className="h-10 w-10 bg-blue-500 rounded-full flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-90 transition"
@@ -82,7 +82,9 @@ const Header = () => {
               >
                 A
               </div>
+              <span className="text-xs text-gray-700">Administrateur</span>
 
+              {/* Menu profil */}
               <AnimatePresence>
                 {profileMenuOpen && (
                   <motion.div
@@ -129,7 +131,7 @@ const Header = () => {
                       ⚙️ Paramètres
                     </Link>
 
-                    {/* 🚪 Déconnexion tout en bas */}
+                    {/* Déconnexion tout en bas */}
                     <button
                       onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-200"
@@ -168,7 +170,7 @@ const Header = () => {
         )}
       </AnimatePresence>
 
-      {/* Menu mobile (à compléter) */}
+      {/* Menu mobile latéral (à compléter) */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div

@@ -4,7 +4,6 @@ import axios from 'axios';
 
 const Sidebar = () => {
   const [hasPendingIncidents, setHasPendingIncidents] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -26,22 +25,8 @@ const Sidebar = () => {
   const isActive = (path) => location.pathname.startsWith(path);
 
   return (
-    <div
-      className={`bg-gray-900 text-white ${
-        isCollapsed ? 'w-16' : 'w-64'
-      } h-[calc(100vh-64px)] fixed top-16 left-0 p-4 flex flex-col justify-between transition-all duration-300`}
-    >
+    <div className="bg-gray-900 text-white w-64 h-[calc(100vh-64px)] fixed top-16 left-0 p-4 flex flex-col justify-between">
       <div>
-        <div className="flex justify-start mb-4">
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            className="text-gray-400 hover:text-white transition"
-            title={isCollapsed ? 'Déplier' : 'Replier'}
-          >
-            {isCollapsed ? '➡️' : '⬅️'}
-          </button>
-        </div>
-
         <nav className="mt-2">
           <ul className="space-y-6">
             <li>
@@ -51,7 +36,7 @@ const Sidebar = () => {
                   isActive('/dashboard') ? 'text-blue-400' : 'hover:text-blue-300'
                 }`}
               >
-                🏠 {!isCollapsed && 'Tableau de bord'}
+                🏠 Tableau de bord
               </Link>
             </li>
 
@@ -66,9 +51,9 @@ const Sidebar = () => {
                     : 'hover:text-blue-300'
                 }`}
               >
-                📢 {!isCollapsed && 'Incidents'}
+                📢 Incidents
               </Link>
-              {hasPendingIncidents && !isCollapsed && (
+              {hasPendingIncidents && (
                 <span className="absolute -top-1 -right-2 bg-red-500 text-xs text-white rounded-full w-5 h-5 flex items-center justify-center">
                   !
                 </span>
@@ -82,7 +67,7 @@ const Sidebar = () => {
                   isActive('/notifications') ? 'text-blue-400' : 'hover:text-blue-300'
                 }`}
               >
-                🔔 {!isCollapsed && 'Notifications'}
+                🔔 Notifications
               </Link>
             </li>
 
@@ -95,7 +80,7 @@ const Sidebar = () => {
                     : 'hover:text-blue-300'
                 }`}
               >
-                📝 {!isCollapsed && 'Créer un Article'}
+                📝 Créer un Article
               </Link>
             </li>
 
@@ -106,7 +91,7 @@ const Sidebar = () => {
                   isActive('/articles/liste') ? 'text-blue-400' : 'hover:text-blue-300'
                 }`}
               >
-                📋 {!isCollapsed && 'Liste des articles'}
+                📋 Liste des articles
               </Link>
             </li>
 
@@ -119,7 +104,7 @@ const Sidebar = () => {
                     : 'hover:text-blue-300'
                 }`}
               >
-                📁 {!isCollapsed && 'Créer un Projet'}
+                📁 Créer un Projet
               </Link>
             </li>
 
@@ -130,31 +115,29 @@ const Sidebar = () => {
                   isActive('/projects/liste') ? 'text-blue-400' : 'hover:text-blue-300'
                 }`}
               >
-                📄 {!isCollapsed && 'Liste des projets'}
+                📄 Liste des projets
               </Link>
             </li>
           </ul>
         </nav>
       </div>
 
-      {!isCollapsed && (
-        <a
-          href="https://www.facebook.com/mohamedsoighir.attoumani"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group mt-4 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-800 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
-        >
-          <p className="text-sm text-gray-300 group-hover:text-yellow-300 transition">
-            Conçu avec passion pour la sécurité citoyenne à Dembeni
-          </p>
-          <p className="text-base font-bold text-white tracking-wide mt-1 group-hover:text-white">
-            MOHAMED SOIGHIR Attoumani
-          </p>
-          <p className="text-xs text-amber-400 italic mt-1 group-hover:text-amber-300">
-            Bénévole engagé depuis 2018 🇾🇹
-          </p>
-        </a>
-      )}
+      <a
+        href="https://www.facebook.com/mohamedsoighir.attoumani"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group mt-4 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-800 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
+      >
+        <p className="text-sm text-gray-300 group-hover:text-yellow-300 transition">
+          Conçu avec passion pour la sécurité citoyenne à Dembeni
+        </p>
+        <p className="text-base font-bold text-white tracking-wide mt-1 group-hover:text-white">
+          MOHAMED SOIGHIR Attoumani
+        </p>
+        <p className="text-xs text-amber-400 italic mt-1 group-hover:text-amber-300">
+          Bénévole engagé depuis 2018 🇾🇹
+        </p>
+      </a>
     </div>
   );
 };

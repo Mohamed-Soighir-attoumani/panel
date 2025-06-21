@@ -132,28 +132,27 @@ const Header = () => {
         </header>
       </div>
 
-      {/* Bande urgence sous le header */}
+      {/* Bande d’urgence sous le header, derrière le sidebar */}
       <AnimatePresence>
         {location.pathname.startsWith("/incident") && (
-        <motion.div
-          key="emergency-bar"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.5 }}
-          className="absolute top-[64px] left-0 w-full z-10 bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
-        >
-          <div className="px-4 py-2 mt-4 lg:ml-64">
-            <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
-              <p><strong>👮 Police :</strong> 17</p>
-              <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>
-              <p><strong>🚒 Pompiers :</strong> 18</p>
-              <p><strong>🚑 Urgences :</strong> 15</p>
-              <p><strong>🏛️ Mairie :</strong> 0269 61 00 00</p>
+          <motion.div
+            key="emergency-bar"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="absolute top-[64px] left-0 w-full z-10 bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
+          >
+            <div className="px-4 py-2 mt-4 lg:ml-64">
+              <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
+                <p><strong>👮 Police :</strong> 17</p>
+                <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>
+                <p><strong>🚒 Pompiers :</strong> 18</p>
+                <p><strong>🚑 Urgences :</strong> 15</p>
+                <p><strong>🏛️ Mairie :</strong> 0269 61 00 00</p>
+              </div>
             </div>
-          </div>
-        </motion.div>
-
+          </motion.div>
         )}
       </AnimatePresence>
 

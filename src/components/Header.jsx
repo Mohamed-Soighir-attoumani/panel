@@ -122,13 +122,6 @@ const Header = () => {
                       🔒 Changer le mot de passe
                     </Link>
                     <Link
-                      to="/deconnexion-tous"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileMenuOpen(false)}
-                    >
-                      🔐 Déconnexion de tous les appareils
-                    </Link>
-                    <Link
                       to="/parametres"
                       className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
                       onClick={() => setProfileMenuOpen(false)}

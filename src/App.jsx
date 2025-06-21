@@ -2,6 +2,7 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import AdminProfile from './pages/AdminProfile';
+import ChangerMotDePasse from './pages/ChangerMotDePasse';
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
 import NotificationPage from "./pages/NotificationPage";
@@ -21,6 +22,7 @@ const App = () => {
       {/* Routes avec layout */}
       <Route element={<Layout />}>
         <Route path="/profil" element={<AdminProfile />} />
+        <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/incidents" element={<IncidentPage />} />
         <Route path="/notifications" element={<NotificationPage />} />

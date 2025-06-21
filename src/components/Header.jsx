@@ -82,7 +82,7 @@ const Header = () => {
               >
                 A
               </div>
-              <span className="text-xs text-gray-700">Administrateur</span>
+              <span className="text-xs text-gray-700">Mairie de Dembeni</span>
 
               {/* Menu profil */}
               <AnimatePresence>

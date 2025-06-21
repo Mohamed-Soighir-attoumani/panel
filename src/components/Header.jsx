@@ -165,7 +165,7 @@ const Header = () => {
             transition={{ duration: 0.5 }}
             className="fixed top-[64px] z-40 w-full bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
           >
-            <div className="px-4 py-2">
+            <div className="px-4 py-2 mt-2">
               <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
                 <p><strong>👮 Police :</strong> 17</p>
                 <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>

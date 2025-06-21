@@ -160,7 +160,8 @@ const IncidentPage = () => {
   if (error) return <div className="p-6 text-red-500">{error}</div>;
 
   return (
-    <div className="pt-[80px] px-6 pb-6">
+    
+      <div className="mt-[80px] p-6">
       <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
         🛠️ Incidents signalés
       </h1>

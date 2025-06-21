@@ -141,9 +141,9 @@ const Header = () => {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.5 }}
-            className="absolute top-[64px] left-0 w-full z-10 bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
+            className="absolute top-[64px] z-10 lg:ml-64 lg:w-[calc(100%-16rem)] bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
           >
-            <div className="px-4 py-2 mt-4 lg:ml-64">
+            <div className="px-4 py-2 mt-4">
               <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
                 <p><strong>👮 Police :</strong> 17</p>
                 <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>
@@ -155,6 +155,7 @@ const Header = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
 
       {/* Menu mobile latéral */}
       <AnimatePresence>

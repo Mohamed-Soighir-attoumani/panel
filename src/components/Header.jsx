@@ -86,7 +86,7 @@ const Header = () => {
                   className="h-full w-full object-cover"
                 />
               </div>
-              <span className="text-xs text-gray-700">Mairie de Dembeni</span>
+              <span className="text-xs text-gray-700">MAIRIE DE DEMBENI</span>
 
               {/* Menu Profil */}
               <AnimatePresence>

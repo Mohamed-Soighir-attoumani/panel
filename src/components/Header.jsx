@@ -61,11 +61,7 @@ const Header = () => {
               >
                 <Menu className="w-6 h-6 text-gray-600" />
               </button>
-              <img
-                src={require('../assets/images/securidem-logo.png')}
-                alt="Logo"
-                className="h-10 w-10 object-contain"
-              />
+
             </div>
 
             {/* Titre centré */}

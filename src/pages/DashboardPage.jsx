@@ -108,11 +108,12 @@ const DashboardPage = () => {
       datalabels: {
         anchor: 'end',
         align: 'top',
-        formatter: value => value,
+        color: '#000',
         font: {
-          weight: 'bold'
+          weight: 'bold',
+          size: 14
         },
-        color: '#000'
+        formatter: value => value
       }
     },
     scales: {
@@ -143,7 +144,18 @@ const DashboardPage = () => {
           "rgba(255, 206, 86, 1)",
         ],
         borderWidth: 1,
-      },
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          color: '#000',
+          font: {
+            weight: 'bold',
+            size: 14
+          },
+          formatter: value => value
+        }
+      }
     ],
   };
 

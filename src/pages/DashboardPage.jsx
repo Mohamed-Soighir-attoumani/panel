@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
-import { Chart as ChartJS } from "chart.js/auto";
+import {
+  Chart as ChartJS,
+  registerables
+} from "chart.js";
+import ChartDataLabels from "chartjs-plugin-datalabels";
 import IncidentsChart from "../components/IncidentsChart";
-import { API_URL } from "../config"; // ← Lien avec le backend
+import { API_URL } from "../config";
+
+// Enregistrement des composants et du plugin datalabels
+ChartJS.register(...registerables, ChartDataLabels);
 
 const DashboardPage = () => {
   const [incidents, setIncidents] = useState([]);
@@ -84,13 +91,35 @@ const DashboardPage = () => {
 
   const dynamicChartData = groupIncidentsByMonth();
 
-  const chartOptions = {
+  const lineChartOptions = {
     animation: { duration: 1000, easing: "easeInOutQuart" },
     responsive: true,
     plugins: {
       legend: { position: "top" },
       tooltip: { mode: "index", intersect: false },
     },
+  };
+
+  const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: { enabled: true },
+      datalabels: {
+        anchor: 'end',
+        align: 'top',
+        formatter: value => value,
+        font: {
+          weight: 'bold'
+        },
+        color: '#000'
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true
+      }
+    }
   };
 
   const barChartData = {
@@ -183,13 +212,13 @@ const DashboardPage = () => {
                 tension: 0.3,
               }]
             }}
-            options={chartOptions}
+            options={lineChartOptions}
           />
         </div>
 
         <div className="bg-white p-4 shadow rounded">
           <h3 className="text-lg sm:text-xl font-semibold mb-4">📊 Répartition des Incidents</h3>
-          <Bar data={barChartData} options={chartOptions} />
+          <Bar data={barChartData} options={barChartOptions} />
         </div>
       </div>
 

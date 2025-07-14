@@ -218,7 +218,7 @@ const DashboardPage = () => {
 
         <div className="bg-white p-4 shadow rounded">
           <h3 className="text-lg sm:text-xl font-semibold mb-4">📊 Répartition des Incidents</h3>
-          <Bar data={barChartData} options={barChartOptions} />
+          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
         </div>
       </div>
 

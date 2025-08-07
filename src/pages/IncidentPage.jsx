@@ -1,63 +1,30 @@
-import L from "leaflet";
 import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config"; // 🔗 Lien avec backend via config.js
+import { API_URL } from "../config";
 
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
     center={[latitude, longitude]}
     zoom={13}
-    style={{ height: 200, zIndex: 1 }}
+    style={{ height: 200 }}
     className="rounded-md mb-3"
   >
     <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
     <Marker position={[latitude, longitude]}>
-      <Popup>Incident signalé ici</Popup>
+      <Popup>📍 Incident signalé ici</Popup>
     </Marker>
   </MapContainer>
 );
 
-const GlobalIncidentMap = ({ incidents }) => {
-  if (!incidents || incidents.length === 0) return null;
-  const center = [incidents[0].latitude || 0, incidents[0].longitude || 0];
-
-  return (
-    <MapContainer
-      center={center}
-      zoom={12}
-      style={{ height: "400px", marginBottom: "2rem" }}
-      className="rounded-md"
-    >
-      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-      {incidents.map((incident) =>
-        incident.latitude && incident.longitude ? (
-          <Marker
-            key={incident._id}
-            position={[incident.latitude, incident.longitude]}
-          >
-            <Popup>
-              <strong>{incident.title}</strong>
-              <br />
-              {incident.lieu}
-            </Popup>
-          </Marker>
-        ) : null
-      )}
-    </MapContainer>
-  );
-};
-
 const IncidentPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [editIncidentId, setEditIncidentId] = useState(null);
   const [editedIncident, setEditedIncident] = useState({});
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState("");
-
   const lastIncidentIdRef = useRef(null);
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
@@ -66,68 +33,53 @@ const IncidentPage = () => {
     audioRef.current = new Audio("/sounds/notification.mp3");
     audioRef.current.load();
 
-    const handleUserInteraction = () => {
+    const handleClick = () => {
       isAudioAllowedRef.current = true;
-      document.removeEventListener("click", handleUserInteraction);
+      document.removeEventListener("click", handleClick);
     };
 
-    document.addEventListener("click", handleUserInteraction);
+    document.addEventListener("click", handleClick);
     fetchIncidents();
-
     const interval = setInterval(fetchIncidents, 5000);
+
     return () => {
       clearInterval(interval);
-      document.removeEventListener("click", handleUserInteraction);
+      document.removeEventListener("click", handleClick);
     };
   }, [statusFilter, periodFilter]);
 
   const playNotificationSound = () => {
     if (audioRef.current && isAudioAllowedRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.play().catch((err) => console.error("Erreur lecture son :", err));
+      audioRef.current.play().catch((err) => console.error(err));
     }
   };
 
   const fetchIncidents = async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/incidents`, {
+      const res = await axios.get(`${API_URL}/api/incidents`, {
         params: { period: periodFilter },
       });
-      let data = [...response.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      let data = [...res.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
-      if (data.length > 0) {
-        const newestId = data[0]._id;
-        if (lastIncidentIdRef.current && newestId !== lastIncidentIdRef.current) {
-          playNotificationSound();
-        }
-        lastIncidentIdRef.current = newestId;
+      if (data.length > 0 && data[0]._id !== lastIncidentIdRef.current) {
+        playNotificationSound();
+        lastIncidentIdRef.current = data[0]._id;
       }
 
       setIncidents(data);
       setLoading(false);
-    } catch (error) {
-      console.error("Erreur chargement incidents :", error);
-      setError("Impossible de charger les incidents.");
+    } catch (err) {
+      console.error("Erreur incidents :", err);
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Supprimer cet incident ?")) return;
-    try {
-      await axios.delete(`${API_URL}/api/incidents/${id}`);
-      fetchIncidents();
-    } catch (error) {
-      console.error("Erreur suppression :", error);
-      alert("Erreur lors de la suppression.");
-    }
-  };
-
-  const handleEditClick = (incident) => {
+  const handleEdit = (incident) => {
     setEditIncidentId(incident._id);
     setEditedIncident({
       title: incident.title,
@@ -138,119 +90,110 @@ const IncidentPage = () => {
     });
   };
 
-  const handleEditChange = (e) => {
+  const handleChange = (e) => {
     setEditedIncident({ ...editedIncident, [e.target.name]: e.target.value });
   };
 
   const handleUpdate = async () => {
     try {
-      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`,
-        editedIncident,
-        { headers: { "Content-Type": "application/json" } }
-      );
+      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`, editedIncident);
       setEditIncidentId(null);
       fetchIncidents();
-    } catch (error) {
-      console.error("Erreur mise à jour :", error);
-      alert("Erreur lors de la mise à jour.");
+    } catch (err) {
+      console.error("Erreur update :", err);
+      alert("Erreur de mise à jour.");
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Supprimer cet incident ?")) return;
+    try {
+      await axios.delete(`${API_URL}/api/incidents/${id}`);
+      fetchIncidents();
+    } catch (err) {
+      console.error("Erreur suppression :", err);
+      alert("Erreur lors de la suppression.");
     }
   };
 
   if (loading) return <div className="p-6">Chargement...</div>;
-  if (error) return <div className="p-6 text-red-500">{error}</div>;
 
   return (
     <div className="pt-[80px] px-6 pb-6">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
-        🛠️ Incidents signalés
-      </h1>
+      <h1 className="text-3xl font-bold mb-6 text-gray-800">🛠️ Incidents signalés</h1>
 
-      {/* Filtres */}
       <div className="flex gap-4 mb-6">
         <select onChange={(e) => setStatusFilter(e.target.value)} className="input">
-          <option value="Tous">Tous les statuts</option>
+          <option value="Tous">Tous</option>
           <option value="En cours">En cours</option>
-          <option value="En attente">En attente</option>
           <option value="Résolu">Résolu</option>
           <option value="Rejeté">Rejeté</option>
         </select>
 
         <select onChange={(e) => setPeriodFilter(e.target.value)} className="input">
-          <option value="">Toute période</option>
+          <option value="">Toutes dates</option>
           <option value="7">7 derniers jours</option>
           <option value="30">30 derniers jours</option>
         </select>
       </div>
 
-      {/* Liste des incidents */}
-      {incidents.length === 0 ? (
-        <p className="text-gray-500">Aucun incident pour le moment.</p>
-      ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {incidents.map((incident) => (
-            <div key={incident._id} className="bg-white p-5 rounded-xl shadow-md border">
-              {editIncidentId === incident._id ? (
-                <>
-                  <input name="title" value={editedIncident.title} onChange={handleEditChange} className="input mb-2" placeholder="Titre" />
-                  <textarea name="description" value={editedIncident.description} onChange={handleEditChange} className="input mb-2" placeholder="Description" />
-                  <input name="lieu" value={editedIncident.lieu} onChange={handleEditChange} className="input mb-2" placeholder="Lieu" />
-                  <select name="status" value={editedIncident.status} onChange={handleEditChange} className="input mb-2">
-                    <option value="En cours">En cours</option>
-                    <option value="En attente">En attente</option>
-                    <option value="Résolu">Résolu</option>
-                    <option value="Rejeté">Rejeté</option>
-                  </select>
-                  <textarea name="adminComment" value={editedIncident.adminComment} onChange={handleEditChange} className="input mb-2" placeholder="Commentaire" />
-                  <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md w-full mt-2">📂 Enregistrer</button>
-                </>
-              ) : (
-                <>
-                  <h2 className="text-lg font-bold mb-1">{incident.title}</h2>
-                  <p className="text-gray-700 mb-2">{incident.description}</p>
-                  <p className="text-sm text-gray-500 italic mb-1">📍 {incident.lieu}</p>
-                  <p className="text-sm text-blue-600 font-medium mb-1">📌 {incident.status}</p>
-                  <p className="text-sm text-gray-600 mb-1">📨 {incident.adresse || "Adresse inconnue"}</p>
-                  <p className="text-xs text-gray-400">🕒 {new Date(incident.createdAt).toLocaleString()}</p>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {incidents.map((incident) => (
+          <div key={incident._id} className="bg-white p-5 rounded-xl shadow-md border">
+            {editIncidentId === incident._id ? (
+              <>
+                <input name="title" value={editedIncident.title} onChange={handleChange} className="input mb-2" />
+                <textarea name="description" value={editedIncident.description} onChange={handleChange} className="input mb-2" />
+                <input name="lieu" value={editedIncident.lieu} onChange={handleChange} className="input mb-2" />
+                <select name="status" value={editedIncident.status} onChange={handleChange} className="input mb-2">
+                  <option value="En cours">En cours</option>
+                  <option value="Résolu">Résolu</option>
+                  <option value="Rejeté">Rejeté</option>
+                </select>
+                <textarea name="adminComment" value={editedIncident.adminComment} onChange={handleChange} className="input mb-2" placeholder="Commentaire" />
+                <button onClick={handleUpdate} className="btn bg-green-600 text-white w-full">💾 Enregistrer</button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold">{incident.title}</h2>
+                <p className="text-gray-700">{incident.description}</p>
+                <p className="text-sm text-gray-500 mb-1">📍 {incident.lieu}</p>
+                <p className="text-sm text-blue-600 font-medium">📌 {incident.status}</p>
+                <p className="text-xs text-gray-500 mb-1">📫 {incident.adresse || "Adresse inconnue"}</p>
+                <p className="text-xs text-gray-400">🕒 {new Date(incident.createdAt).toLocaleString()}</p>
 
-                  {incident.latitude && incident.longitude && (
-                    <>
-                      <p className="text-sm text-gray-600 mb-2">📡 {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
-                      <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
-                    </>
-                  )}
+                {incident.latitude && incident.longitude && (
+                  <>
+                    <p className="text-xs text-gray-600">📡 {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
+                    <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
+                  </>
+                )}
 
-                  <p className="text-sm text-gray-700 mb-2">📝 {incident.adminComment || <em className="text-gray-400">Aucun commentaire</em>}</p>
+                <p className="text-sm text-gray-600 italic">📝 {incident.adminComment || "Aucun commentaire"}</p>
 
-                  {/* Affichage du média */}
-                  <div className="w-full h-40 rounded-lg border overflow-hidden mb-3">
-                    {incident.mediaType === "video" ? (
-                      <video controls className="w-full h-full object-cover">
-                        <source src={incident.mediaUrl} type="video/mp4" />
-                        Votre navigateur ne supporte pas la lecture de vidéos.
-                      </video>
-                    ) : incident.mediaUrl ? (
-                      <img src={incident.mediaUrl} alt="media" className="w-full h-full object-cover" />
+                <div className="mt-3">
+                  {incident.mediaUrl ? (
+                    incident.mediaType === "video" ? (
+                      <video controls className="w-full h-52 rounded-lg border" src={incident.mediaUrl} />
                     ) : (
-                      <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-                        Aucun média
-                      </div>
-                    )}
-                  </div>
+                      <img src={incident.mediaUrl} alt="media" className="w-full h-52 object-cover rounded-lg border" />
+                    )
+                  ) : (
+                    <div className="w-full h-52 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 text-sm">
+                      Pas de média
+                    </div>
+                  )}
+                </div>
 
-                  <div className="flex justify-between gap-2 mt-4">
-                    <button onClick={() => handleEditClick(incident)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md w-full">
-                      ✏️ Modifier
-                    </button>
-                    <button onClick={() => handleDelete(incident._id)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md w-full">
-                      🗑️ Supprimer
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                <div className="flex justify-between gap-2 mt-4">
+                  <button onClick={() => handleEdit(incident)} className="btn bg-blue-600 text-white w-full">✏️ Modifier</button>
+                  <button onClick={() => handleDelete(incident._id)} className="btn bg-red-600 text-white w-full">🗑️ Supprimer</button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

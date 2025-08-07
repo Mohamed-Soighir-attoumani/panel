@@ -209,37 +209,41 @@ const IncidentPage = () => {
                   <p className="text-gray-700 mb-2">{incident.description}</p>
                   <p className="text-sm text-gray-500 italic mb-1">📍 {incident.lieu}</p>
                   <p className="text-sm text-blue-600 font-medium mb-1">📌 {incident.status}</p>
-                  <p className="text-sm text-gray-600 mb-1">📬 {incident.adresse || "Adresse inconnue"}</p>
+                  <p className="text-sm text-gray-600 mb-1">📨 {incident.adresse || "Adresse inconnue"}</p>
                   <p className="text-xs text-gray-400">🕒 {new Date(incident.createdAt).toLocaleString()}</p>
+
                   {incident.latitude && incident.longitude && (
                     <>
-                      <p className="text-sm text-gray-600 mb-2">🛱️ {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
+                      <p className="text-sm text-gray-600 mb-2">📡 {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
                       <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
                     </>
                   )}
+
                   <p className="text-sm text-gray-700 mb-2">📝 {incident.adminComment || <em className="text-gray-400">Aucun commentaire</em>}</p>
 
-                  {/* Affichage de l'image ou de la vidéo */}
-                  <div className="mt-3">
-                    {incident.mediaUrl ? (
-                      incident.mediaType === "video" ? (
-                        <video controls className="w-full h-40 rounded-lg border object-cover">
-                          <source src={incident.mediaUrl} type="video/mp4" />
-                          Votre navigateur ne prend pas en charge les vidéos.
-                        </video>
-                      ) : (
-                        <a href={incident.mediaUrl} target="_blank" rel="noopener noreferrer">
-                          <img src={incident.mediaUrl} alt="media" className="w-full h-40 object-cover rounded-lg border" />
-                        </a>
-                      )
+                  {/* Affichage du média */}
+                  <div className="w-full h-40 rounded-lg border overflow-hidden mb-3">
+                    {incident.mediaType === "video" ? (
+                      <video controls className="w-full h-full object-cover">
+                        <source src={incident.mediaUrl} type="video/mp4" />
+                        Votre navigateur ne supporte pas la lecture de vidéos.
+                      </video>
+                    ) : incident.mediaUrl ? (
+                      <img src={incident.mediaUrl} alt="media" className="w-full h-full object-cover" />
                     ) : (
-                      <div className="w-full h-40 bg-gray-100 rounded-lg border flex items-center justify-center text-gray-400 text-sm">Pas de média</div>
+                      <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
+                        Aucun média
+                      </div>
                     )}
                   </div>
 
                   <div className="flex justify-between gap-2 mt-4">
-                    <button onClick={() => handleEditClick(incident)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md w-full">✏️ Modifier</button>
-                    <button onClick={() => handleDelete(incident._id)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md w-full">🗑️ Supprimer</button>
+                    <button onClick={() => handleEditClick(incident)} className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md w-full">
+                      ✏️ Modifier
+                    </button>
+                    <button onClick={() => handleDelete(incident._id)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md w-full">
+                      🗑️ Supprimer
+                    </button>
                   </div>
                 </>
               )}

@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { API_URL } from "../config";
 
-/** Normalise les URLs média: si relatif, on préfixe avec l'API_URL */
+
 const getMediaUrl = (url) => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
@@ -229,7 +229,7 @@ const IncidentPage = () => {
 
                         <p className="text-sm text-gray-600 italic">📝 {incident.adminComment || "Aucun commentaire"}</p>
 
-                        {/* Média */}
+                        
                         <div className="mt-3 relative" style={{ zIndex: 1 }}>
                           {mediaUrl ? (
                             incident.mediaType === "video" ? (

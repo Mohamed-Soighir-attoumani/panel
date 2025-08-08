@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config";
+import { API_URL } from "../config"; // 🔗 Lien avec backend via config.js
 
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
@@ -22,6 +22,7 @@ const IncidentMap = ({ latitude, longitude }) => (
 const GlobalIncidentMap = ({ incidents }) => {
   if (!incidents || incidents.length === 0) return null;
   const center = [incidents[0].latitude || 0, incidents[0].longitude || 0];
+
   return (
     <MapContainer
       center={center}
@@ -32,7 +33,10 @@ const GlobalIncidentMap = ({ incidents }) => {
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       {incidents.map((incident) =>
         incident.latitude && incident.longitude ? (
-          <Marker key={incident._id} position={[incident.latitude, incident.longitude]}>
+          <Marker
+            key={incident._id}
+            position={[incident.latitude, incident.longitude]}
+          >
             <Popup>
               <strong>{incident.title}</strong>
               <br />
@@ -48,66 +52,39 @@ const GlobalIncidentMap = ({ incidents }) => {
 const IncidentPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState(null);
+  const [error, setError] = useState(null);
   const [editIncidentId, setEditIncidentId] = useState(null);
   const [editedIncident, setEditedIncident] = useState({});
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState("");
 
-  // 🔊 Contrôle du son
-  const [soundEnabled, setSoundEnabled] = useState(() => {
-    const saved = localStorage.getItem("securidem_sound_enabled");
-    return saved === null ? true : saved === "true";
-  });
-  const [volume, setVolume] = useState(() => {
-    const saved = localStorage.getItem("securidem_sound_volume");
-    return saved ? Number(saved) : 1;
-  });
-
   const lastIncidentIdRef = useRef(null);
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
-  const firstLoadRef = useRef(true);
 
-  // Prépare le son + lève le blocage autoplay après 1 clic
   useEffect(() => {
     audioRef.current = new Audio("/sounds/notification.mp3");
     audioRef.current.load();
+
     const handleUserInteraction = () => {
       isAudioAllowedRef.current = true;
       document.removeEventListener("click", handleUserInteraction);
     };
+
     document.addEventListener("click", handleUserInteraction);
-
     fetchIncidents();
-    const interval = setInterval(fetchIncidents, 5000);
 
+    const interval = setInterval(fetchIncidents, 5000);
     return () => {
       clearInterval(interval);
       document.removeEventListener("click", handleUserInteraction);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, periodFilter]);
 
-  // Persiste les préférences
-  useEffect(() => {
-    localStorage.setItem("securidem_sound_enabled", String(soundEnabled));
-  }, [soundEnabled]);
-  useEffect(() => {
-    localStorage.setItem("securidem_sound_volume", String(volume));
-  }, [volume]);
-
   const playNotificationSound = () => {
-    if (!soundEnabled) return;                       // respect du switch
-    if (document.visibilityState !== "visible") return; // pas de son onglet inactif
-    if (!audioRef.current || !isAudioAllowedRef.current) return;
-
-    try {
+    if (audioRef.current && isAudioAllowedRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.volume = Math.min(Math.max(volume, 0), 1);
       audioRef.current.play().catch((err) => console.error("Erreur lecture son :", err));
-    } catch (e) {
-      console.error("Audio error:", e);
     }
   };
 
@@ -117,19 +94,18 @@ const IncidentPage = () => {
         params: { period: periodFilter },
       });
       let data = [...response.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
       if (data.length > 0) {
         const newestId = data[0]._id;
-        // Ne pas jouer au premier chargement pour éviter le bip initial
-        if (!firstLoadRef.current && lastIncidentIdRef.current && newestId !== lastIncidentIdRef.current) {
+        if (lastIncidentIdRef.current && newestId !== lastIncidentIdRef.current) {
           playNotificationSound();
         }
         lastIncidentIdRef.current = newestId;
       }
-      firstLoadRef.current = false;
 
       setIncidents(data);
       setLoading(false);
@@ -161,13 +137,14 @@ const IncidentPage = () => {
       adminComment: incident.adminComment || "",
     });
   };
+
   const handleEditChange = (e) => {
     setEditedIncident({ ...editedIncident, [e.target.name]: e.target.value });
   };
+
   const handleUpdate = async () => {
     try {
-      await axios.put(
-        `${API_URL}/api/incidents/${editIncidentId}`,
+      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`,
         editedIncident,
         { headers: { "Content-Type": "application/json" } }
       );
@@ -180,40 +157,13 @@ const IncidentPage = () => {
   };
 
   if (loading) return <div className="p-6">Chargement...</div>;
-  if (error)   return <div className="p-6 text-red-500">{error}</div>;
+  if (error) return <div className="p-6 text-red-500">{error}</div>;
 
   return (
     <div className="pt-[80px] px-6 pb-6">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-3xl font-bold text-gray-800 border-b pb-2">
-          🛠️ Incidents signalés
-        </h1>
-
-        {/* 🎚️ Contrôle du son */}
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={soundEnabled}
-              onChange={(e) => setSoundEnabled(e.target.checked)}
-            />
-            Son notifications
-          </label>
-          <div className="flex items-center gap-2 text-sm">
-            <span>🔊</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              style={{ width: 120 }}
-              title="Volume"
-            />
-          </div>
-        </div>
-      </div>
+      <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
+        🛠️ Incidents signalés
+      </h1>
 
       {/* Filtres */}
       <div className="flex gap-4 mb-6">
@@ -232,6 +182,7 @@ const IncidentPage = () => {
         </select>
       </div>
 
+      {/* Liste des incidents */}
       {incidents.length === 0 ? (
         <p className="text-gray-500">Aucun incident pour le moment.</p>
       ) : (
@@ -250,7 +201,7 @@ const IncidentPage = () => {
                     <option value="Rejeté">Rejeté</option>
                   </select>
                   <textarea name="adminComment" value={editedIncident.adminComment} onChange={handleEditChange} className="input mb-2" placeholder="Commentaire" />
-                  <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md w-full mt-2">💾 Enregistrer</button>
+                  <button onClick={handleUpdate} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md w-full mt-2">📂 Enregistrer</button>
                 </>
               ) : (
                 <>
@@ -258,19 +209,17 @@ const IncidentPage = () => {
                   <p className="text-gray-700 mb-2">{incident.description}</p>
                   <p className="text-sm text-gray-500 italic mb-1">📍 {incident.lieu}</p>
                   <p className="text-sm text-blue-600 font-medium mb-1">📌 {incident.status}</p>
-                  <p className="text-sm text-gray-600 mb-1">📫 {incident.adresse || "Adresse inconnue"}</p>
+                  <p className="text-sm text-gray-600 mb-1">📬 {incident.adresse || "Adresse inconnue"}</p>
                   <p className="text-xs text-gray-400">🕒 {new Date(incident.createdAt).toLocaleString()}</p>
-
                   {incident.latitude && incident.longitude && (
                     <>
-                      <p className="text-sm text-gray-600 mb-2">📡 {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
+                      <p className="text-sm text-gray-600 mb-2">🛱️ {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}</p>
                       <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
                     </>
                   )}
-
                   <p className="text-sm text-gray-700 mb-2">📝 {incident.adminComment || <em className="text-gray-400">Aucun commentaire</em>}</p>
 
-                  {/* Média */}
+                  {/* Affichage de l'image ou de la vidéo */}
                   <div className="mt-3">
                     {incident.mediaUrl ? (
                       incident.mediaType === "video" ? (

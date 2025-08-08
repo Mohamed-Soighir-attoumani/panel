@@ -274,5 +274,4 @@ const IncidentPage = () => {
     </div>
   );
 };
-
 export default IncidentPage;

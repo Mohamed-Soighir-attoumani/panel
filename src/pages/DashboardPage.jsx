@@ -7,6 +7,7 @@ import {
 } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
 import IncidentsChart from "../components/IncidentsChart";
+import DevicesTable from "../components/DevicesTable";
 import { API_URL } from "../config";
 
 // Enregistrement des composants et du plugin datalabels
@@ -233,7 +234,9 @@ const DashboardPage = () => {
           <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
         </div>
       </div>
-
+      <div className="mt-6">
+      <DevicesTable />
+      </div>
       <div className="bg-white p-4 shadow rounded">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

@@ -1,3 +1,4 @@
+// ChangerMotDePasse.jsx
 import React, { useState } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -10,6 +11,8 @@ const ChangerMotDePasse = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  const API_URL = process.env.REACT_APP_API_URL; // ex: https://backend-admin-tygd.onrender.com
+
   const getPasswordStrength = (password) => {
     if (password.length < 6) return 'Faible';
     if (/[A-Z]/.test(password) && /\d/.test(password) && /[!@#$%^&*]/.test(password)) return 'Fort';
@@ -19,14 +22,25 @@ const ChangerMotDePasse = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!API_URL) {
+      toast.error("Configuration manquante : REACT_APP_API_URL");
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       toast.error('❌ Les nouveaux mots de passe ne correspondent pas.');
       return;
     }
 
+    const token = localStorage.getItem('token');
+    if (!token) {
+      toast.error('Vous devez être connecté.');
+      window.location.href = '/login';
+      return;
+    }
+
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/change-password`, {
+      const response = await fetch(`${API_URL}/api/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -37,6 +51,14 @@ const ChangerMotDePasse = () => {
 
       const text = await response.text();
       const data = text ? JSON.parse(text) : {};
+
+      if (response.status === 401 || response.status === 403) {
+        // Token invalide/expiré
+        toast.error(data.message || 'Session expirée. Veuillez vous reconnecter.');
+        localStorage.removeItem('token');
+        setTimeout(() => (window.location.href = '/login'), 1000);
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(data.message || 'Erreur lors de la mise à jour.');

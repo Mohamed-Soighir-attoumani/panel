@@ -3,8 +3,7 @@ import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 
-// ⚙️ Si tu utilises CRA: process.env.REACT_APP_API_URL
-// (si tu as déjà un config.js, importe-le et remplace ci-dessous)
+// CRA: REACT_APP_API_URL
 const API_URL = process.env.REACT_APP_API_URL || '';
 
 const Header = () => {
@@ -14,13 +13,13 @@ const Header = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
-  // On prévoit tous les champs possibles : communeName (si tu l’ajoutes côté backend),
-  // name (Admin.name), email, photo.
+  // ➕ role ajouté
   const [adminInfo, setAdminInfo] = useState({
     communeName: '',
     name: '',
     email: '',
-    photo: ''
+    photo: '',
+    role: '' // 'admin' | 'superadmin'
   });
 
   const pageTitle =
@@ -32,11 +31,11 @@ const Header = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    localStorage.removeItem('admin'); // on nettoie aussi l’info mise en cache
+    localStorage.removeItem('admin'); // nettoie le cache local
     navigate('/login');
   };
 
-  // 🔎 Récupère l’admin depuis l’API (source de vérité) + fallback localStorage
+  // 🔎 Source de vérité: /api/me → on stocke aussi role
   useEffect(() => {
     const fromLocal = (() => {
       try {
@@ -61,20 +60,20 @@ const Header = () => {
           return null;
         }
         const data = await r.json();
-        // Attendu: { user: { name?, email, role, communeName? ... } }
+        // Attendu: { user: { name?, email, role, communeName?, photo? } }
         const u = data?.user || {};
         const next = {
-          communeName: u.communeName || u.commune || '', // si tu ajoutes ce champ côté backend
+          communeName: u.communeName || u.commune || '',
           name: u.name || '',
           email: u.email || '',
           photo: u.photo || '',
+          role: u.role || '' // ➕
         };
         setAdminInfo(next);
-        // on met en cache pour accélérer les prochains rendus
         localStorage.setItem('admin', JSON.stringify(next));
       })
       .catch(() => {
-        // Si l’API tombe, on garde ce qu’on a en local
+        // Si l’API tombe, on garde le cache
       });
   }, []);
 
@@ -90,12 +89,18 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [profileMenuOpen]);
 
-  // 🏷️ Texte dynamique : priorité à la commune, sinon nom, sinon email, sinon fallback
+  // 🏷️ Texte dynamique sous l’avatar
   const badgeText =
     adminInfo.communeName?.trim() ||
     adminInfo.name?.trim() ||
     (adminInfo.email ? adminInfo.email.split('@')[0] : '') ||
     'Administrateur';
+
+  // (Optionnel) Badge rôle lisible
+  const roleBadge =
+    adminInfo.role === 'superadmin'
+      ? 'SUPERADMINISTRATEUR'
+      : (adminInfo.role === 'admin' ? 'ADMINISTRATEUR' : '');
 
   return (
     <>
@@ -125,18 +130,21 @@ const Header = () => {
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
                 title="Profil administrateur"
               >
-                {/* Remplace avec ton import si tu préfères */}
                 <img
-                  src={
-                    adminInfo.photo ||
-                    '/logo192.png' /* fallback CRA; sinon remplace par ton logo public */
-                  }
+                  src={adminInfo.photo || '/logo192.png'}
                   alt="Profil"
                   className="h-full w-full object-cover"
                 />
               </div>
-              {/* ⬇️ Ici on affiche la commune (dynamique) */}
+
+              {/* Ligne 1 : commune / nom */}
               <span className="text-xs text-gray-700">{badgeText}</span>
+              {/* Ligne 2 : badge rôle (optionnel, si tu veux que ce soit visible) */}
+              {roleBadge && (
+                <span className="text-[10px] font-semibold text-purple-700 tracking-wider">
+                  {roleBadge}
+                </span>
+              )}
 
               {/* Menu Profil */}
               <AnimatePresence>
@@ -163,12 +171,18 @@ const Header = () => {
                     >
                       🔄 Modifier les informations
                     </Link>
-                    <Link
-                      to="/admins"
-                      className="flex items-center gap-3 p-3 bg-gray-100 rounded hover:bg-gray-200 transition"
-                    >
-                    <span>Administrateurs (communes)</span>
-                    </Link>
+
+                    {/* ⬇️ Afficher l’entrée Superadmin uniquement si role === 'superadmin' */}
+                    {adminInfo.role === 'superadmin' && (
+                      <Link
+                        to="/admins"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                        onClick={() => setProfileMenuOpen(false)}
+                      >
+                        👥 Administrateurs (communes)
+                      </Link>
+                    )}
+
                     <Link
                       to="/changer-photo"
                       className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"

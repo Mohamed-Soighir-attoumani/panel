@@ -164,6 +164,12 @@ const Header = () => {
                       🔄 Modifier les informations
                     </Link>
                     <Link
+                      to="/admins"
+                      className="flex items-center gap-3 p-3 bg-gray-100 rounded hover:bg-gray-200 transition"
+                    >
+                    <span>Administrateurs (communes)</span>
+                    </Link>
+                    <Link
                       to="/changer-photo"
                       className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
                       onClick={() => setProfileMenuOpen(false)}

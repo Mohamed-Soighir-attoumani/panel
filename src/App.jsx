@@ -4,6 +4,7 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 import LoginPage from "./pages/LoginPage";
+import SuperadminAdmins from './pages/SuperadminAdmins.jsx';
 import AdminProfile from "./pages/AdminProfile";
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
@@ -25,6 +26,7 @@ const App = () => {
 
         {/* Routes avec layout */}
         <Route element={<Layout />}>
+          <Route path="/admins" element={<SuperadminAdmins />} />
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
           <Route path="/dashboard" element={<DashboardPage />} />

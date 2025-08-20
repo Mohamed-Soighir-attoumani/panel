@@ -1,36 +1,81 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 
+// ⚙️ Si tu utilises CRA: process.env.REACT_APP_API_URL
+// (si tu as déjà un config.js, importe-le et remplace ci-dessous)
+const API_URL = process.env.REACT_APP_API_URL || '';
+
 const Header = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
-  const [adminInfo, setAdminInfo] = useState({ nom: '', prenom: '', email: '', photo: '' });
+  // On prévoit tous les champs possibles : communeName (si tu l’ajoutes côté backend),
+  // name (Admin.name), email, photo.
+  const [adminInfo, setAdminInfo] = useState({
+    communeName: '',
+    name: '',
+    email: '',
+    photo: ''
+  });
 
   const pageTitle =
-    location.pathname === "/dashboard"
-      ? "Tableau de bord"
-      : location.pathname.split("/")[1].charAt(0).toUpperCase() +
-        location.pathname.split("/")[1].slice(1);
+    location.pathname === '/dashboard'
+      ? 'Tableau de bord'
+      : location.pathname.split('/')[1]
+          ? location.pathname.split('/')[1].charAt(0).toUpperCase() + location.pathname.split('/')[1].slice(1)
+          : 'Tableau de bord';
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    window.location.href = "/";
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin'); // on nettoie aussi l’info mise en cache
+    navigate('/login');
   };
 
+  // 🔎 Récupère l’admin depuis l’API (source de vérité) + fallback localStorage
   useEffect(() => {
-    const stored = localStorage.getItem('admin');
-    if (stored) {
+    const fromLocal = (() => {
       try {
-        setAdminInfo(JSON.parse(stored));
-      } catch (err) {
-        console.error("Erreur parsing admin info", err);
+        const raw = localStorage.getItem('admin');
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
       }
-    }
+    })();
+
+    if (fromLocal) setAdminInfo(prev => ({ ...prev, ...fromLocal }));
+
+    const token = localStorage.getItem('token');
+    if (!token || !API_URL) return;
+
+    fetch(`${API_URL}/api/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (r) => {
+        if (r.status === 401 || r.status === 403) {
+          handleLogout();
+          return null;
+        }
+        const data = await r.json();
+        // Attendu: { user: { name?, email, role, communeName? ... } }
+        const u = data?.user || {};
+        const next = {
+          communeName: u.communeName || u.commune || '', // si tu ajoutes ce champ côté backend
+          name: u.name || '',
+          email: u.email || '',
+          photo: u.photo || '',
+        };
+        setAdminInfo(next);
+        // on met en cache pour accélérer les prochains rendus
+        localStorage.setItem('admin', JSON.stringify(next));
+      })
+      .catch(() => {
+        // Si l’API tombe, on garde ce qu’on a en local
+      });
   }, []);
 
   useEffect(() => {
@@ -42,10 +87,15 @@ const Header = () => {
     if (profileMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [profileMenuOpen]);
+
+  // 🏷️ Texte dynamique : priorité à la commune, sinon nom, sinon email, sinon fallback
+  const badgeText =
+    adminInfo.communeName?.trim() ||
+    adminInfo.name?.trim() ||
+    (adminInfo.email ? adminInfo.email.split('@')[0] : '') ||
+    'Administrateur';
 
   return (
     <>
@@ -61,7 +111,6 @@ const Header = () => {
               >
                 <Menu className="w-6 h-6 text-gray-600" />
               </button>
-
             </div>
 
             {/* Titre centré */}
@@ -76,13 +125,18 @@ const Header = () => {
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
                 title="Profil administrateur"
               >
+                {/* Remplace avec ton import si tu préfères */}
                 <img
-                  src={adminInfo.photo || require('../assets/images/securidem-logo.png')}
+                  src={
+                    adminInfo.photo ||
+                    '/logo192.png' /* fallback CRA; sinon remplace par ton logo public */
+                  }
                   alt="Profil"
                   className="h-full w-full object-cover"
                 />
               </div>
-              <span className="text-xs text-gray-700">ADMINISTRATEUR</span>
+              {/* ⬇️ Ici on affiche la commune (dynamique) */}
+              <span className="text-xs text-gray-700">{badgeText}</span>
 
               {/* Menu Profil */}
               <AnimatePresence>
@@ -97,21 +151,37 @@ const Header = () => {
                   >
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
-                        {adminInfo.prenom} {adminInfo.nom}
+                        {adminInfo.name || badgeText}
                       </p>
                       <p className="text-xs text-gray-500">{adminInfo.email}</p>
                     </div>
 
-                    <Link to="/profil" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
+                    <Link
+                      to="/profil"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
                       🔄 Modifier les informations
                     </Link>
-                    <Link to="/changer-photo" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
+                    <Link
+                      to="/changer-photo"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
                       🖼️ Changer la photo
                     </Link>
-                    <Link to="/changer-mot-de-passe" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
+                    <Link
+                      to="/changer-mot-de-passe"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
                       🔒 Changer le mot de passe
                     </Link>
-                    <Link to="/parametres" className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700" onClick={() => setProfileMenuOpen(false)}>
+                    <Link
+                      to="/parametres"
+                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                      onClick={() => setProfileMenuOpen(false)}
+                    >
                       ⚙️ Paramètres
                     </Link>
                     <button
@@ -128,13 +198,13 @@ const Header = () => {
         </header>
       </div>
 
-      {/* Bande d’urgence sous le header, derrière le sidebar */}
+      {/* Bande d’urgence sous le header */}
       <AnimatePresence>
-        {location.pathname.startsWith("/incident") && (
+        {location.pathname.startsWith('/incident') && (
           <motion.div
             key="emergency-bar"
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
+            animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.5 }}
             className="absolute top-[64px] z-10 lg:ml-64 lg:w-[calc(100%-16rem)] bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
@@ -152,14 +222,13 @@ const Header = () => {
         )}
       </AnimatePresence>
 
-
       {/* Menu mobile latéral */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
-            initial={{ x: "-100%" }}
+            initial={{ x: '-100%' }}
             animate={{ x: 0 }}
-            exit={{ x: "-100%" }}
+            exit={{ x: '-100%' }}
             transition={{ duration: 0.3 }}
             className="fixed top-16 left-0 w-52 h-[calc(100vh-64px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
           >

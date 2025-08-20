@@ -1,119 +1,73 @@
-import React, { useState, useEffect } from "react";
-import axios from "axios";
-import { useNavigate } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+// src/pages/Login.jsx
+import React, { useState } from 'react';
+import { API_URL } from '../config';
+import { useNavigate } from 'react-router-dom';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
-const LoginPage = () => {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const navigate = useNavigate();
+export default function Login() {
+  const nav = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const slides = [
-    "Signalez les incidents de votre quartier en temps réel.",
-    "Recevez des alertes de sécurité directement sur votre téléphone.",
-    "Participez à la sécurité de Dembeni avec la mairie.",
-    "Ensemble, rendons notre commune plus sûre et solidaire.",
-  ];
-  const [currentSlide, setCurrentSlide] = useState(0);
-
-  // ✅ URL dynamique selon le fichier .env
-  const API_URL = process.env.REACT_APP_API_URL;
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % slides.length);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleSubmit = async (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    try {
-      const response = await axios.post(`${API_URL}/api/login`, {
-        email,
-        password,
-      });
+    if (!API_URL) return toast.error('REACT_APP_API_URL manquant côté front');
 
-      if (response.data.token) {
-        localStorage.setItem("token", response.data.token);
-        navigate("/dashboard");
-      }
+    try {
+      setLoading(true);
+      const r = await fetch(`${API_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await r.json();
+      if (!r.ok || !data.token) throw new Error(data.message || 'Identifiants invalides');
+      localStorage.setItem('token', data.token);
+      nav('/dashboard');
     } catch (err) {
-      setError("Identifiants invalides");
+      toast.error(err.message || 'Erreur de connexion');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="relative h-screen w-full overflow-hidden">
-      <div className="absolute inset-0 z-0 animate-gradient-x bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-[length:400%_400%]" />
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      <ToastContainer />
+      <form onSubmit={submit} className="bg-white shadow rounded p-6 w-full max-w-sm">
+        <h1 className="text-xl font-semibold mb-4">Connexion</h1>
 
-      <div className="relative z-10 flex items-center justify-center h-full px-4">
-        <div className="backdrop-blur-lg bg-white/30 rounded-xl shadow-2xl flex flex-col lg:flex-row w-full max-w-6xl overflow-hidden">
-          <div className={`lg:w-1/2 w-full p-10 text-white flex flex-col justify-center relative transition-colors duration-1000 ease-in-out ${
-              [
-                "bg-gradient-to-br from-indigo-800 to-purple-900",
-                "bg-gradient-to-br from-purple-800 to-pink-700",
-                "bg-gradient-to-br from-pink-700 to-red-600",
-                "bg-gradient-to-br from-emerald-700 to-cyan-700",
-              ][currentSlide]
-            }`}>
-            <ShieldCheck size={48} className="absolute top-6 left-6 text-white opacity-90" />
-            <h1 className="text-4xl font-bold mb-6 mt-10 lg:mt-0">SécuriDem</h1>
-            <div className="text-lg mb-4 leading-relaxed min-h-[100px] transition-all duration-700 ease-in-out">
-              <p className="animate-fade-in">{slides[currentSlide]}</p>
-            </div>
-            <p className="text-sm text-gray-300 mt-6">Pour une commune plus sûre et solidaire.</p>
-          </div>
+        <label className="block text-sm text-gray-700">Email</label>
+        <input
+          type="email"
+          name="email"
+          autoComplete="username"
+          className="w-full border p-2 rounded mb-3"
+          value={email}
+          onChange={(e)=>setEmail(e.target.value)}
+          required
+        />
 
-          <div className="lg:w-1/2 w-full p-10 bg-white bg-opacity-90">
-            <h2 className="text-3xl font-semibold text-gray-800 mb-6 text-center">Connexion</h2>
-            {error && (
-              <p className="text-red-600 text-center mb-4 animate-pulse transition duration-300">
-                {error}
-              </p>
-            )}
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                  Adresse email
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  className="w-full p-3 mt-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 transition"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                  Mot de passe
-                </label>
-                <input
-                  type="password"
-                  id="password"
-                  name="password"
-                  className="w-full p-3 mt-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-600 transition"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-semibold"
-              >
-                Se connecter
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
+        <label className="block text-sm text-gray-700">Mot de passe</label>
+        <input
+          type="password"
+          name="password"
+          autoComplete="current-password"
+          className="w-full border p-2 rounded mb-4"
+          value={password}
+          onChange={(e)=>setPassword(e.target.value)}
+          required
+        />
+
+        <button
+          disabled={loading}
+          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition disabled:opacity-60"
+        >
+          {loading ? 'Connexion…' : 'Se connecter'}
+        </button>
+      </form>
     </div>
   );
-};
-
-export default LoginPage;
+}

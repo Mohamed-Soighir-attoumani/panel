@@ -10,12 +10,10 @@ function safeDecodeJwtRole() {
     const t = localStorage.getItem('token');
     if (!t) return null;
     const payload = JSON.parse(atob(t.split('.')[1] || ''));
-    // On récupère ce qu’on peut immédiatement du token
     return {
       role: payload?.role || '',
       communeName: payload?.communeName || '',
       email: payload?.email || '',
-      // on n’a généralement pas name/photo dans le token
     };
   } catch {
     return null;
@@ -56,9 +54,8 @@ const Header = () => {
     if (decoded) {
       setAdminInfo(prev => ({
         ...prev,
-        ...decoded, // role, communeName, email (si dispo)
+        ...decoded,
       }));
-      // Mettez à jour le cache local si absent
       const cached = localStorage.getItem('admin');
       if (!cached) {
         localStorage.setItem('admin', JSON.stringify({
@@ -86,10 +83,10 @@ const Header = () => {
   }, []);
 
   // 3) Source de vérité: /api/me → merge et met en cache
+  //    ⚠️ On le lance une seule fois au montage (pas besoin d'ignorer une règle ESLint)
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token) return; // pas connecté
-    if (!API_URL) return; // pas d’URL API → on reste avec le JWT et le cache
+    if (!token || !API_URL) return;
 
     fetch(`${API_URL}/api/me`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -106,16 +103,16 @@ const Header = () => {
           name: u.name || '',
           email: u.email || '',
           photo: u.photo || '',
-          role: u.role || adminInfo.role || '' // conserve le role si l’API ne le renvoie pas
+          role: u.role || adminInfo.role || ''
         };
         setAdminInfo(next);
         localStorage.setItem('admin', JSON.stringify(next));
       })
       .catch(() => {
-        // Si l’API tombe, on garde ce qu’on a (JWT + cache)
+        // Si l’API tombe, on garde JWT + cache
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API_URL]);
+    // ← pas de commentaire eslint ici
+  }, []); // exécuter une fois au montage
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -208,7 +205,6 @@ const Header = () => {
                       🔄 Modifier les informations
                     </Link>
 
-                    {/* Visible UNIQUEMENT si le rôle est superadmin (dès le JWT) */}
                     {adminInfo.role === 'superadmin' && (
                       <Link
                         to="/admins"

@@ -3,8 +3,24 @@ import { useLocation, Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 
-// CRA: REACT_APP_API_URL
 const API_URL = process.env.REACT_APP_API_URL || '';
+
+function safeDecodeJwtRole() {
+  try {
+    const t = localStorage.getItem('token');
+    if (!t) return null;
+    const payload = JSON.parse(atob(t.split('.')[1] || ''));
+    // On récupère ce qu’on peut immédiatement du token
+    return {
+      role: payload?.role || '',
+      communeName: payload?.communeName || '',
+      email: payload?.email || '',
+      // on n’a généralement pas name/photo dans le token
+    };
+  } catch {
+    return null;
+  }
+}
 
 const Header = () => {
   const location = useLocation();
@@ -13,7 +29,6 @@ const Header = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
-  // ➕ role ajouté
   const [adminInfo, setAdminInfo] = useState({
     communeName: '',
     name: '',
@@ -31,25 +46,50 @@ const Header = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    localStorage.removeItem('admin'); // nettoie le cache local
+    localStorage.removeItem('admin');
     navigate('/login');
   };
 
-  // 🔎 Source de vérité: /api/me → on stocke aussi role
+  // 1) Fallback instantané : lire role & commune depuis le JWT
   useEffect(() => {
-    const fromLocal = (() => {
-      try {
-        const raw = localStorage.getItem('admin');
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
+    const decoded = safeDecodeJwtRole();
+    if (decoded) {
+      setAdminInfo(prev => ({
+        ...prev,
+        ...decoded, // role, communeName, email (si dispo)
+      }));
+      // Mettez à jour le cache local si absent
+      const cached = localStorage.getItem('admin');
+      if (!cached) {
+        localStorage.setItem('admin', JSON.stringify({
+          communeName: decoded.communeName || '',
+          name: '',
+          email: decoded.email || '',
+          photo: '',
+          role: decoded.role || ''
+        }));
       }
-    })();
+    }
+  }, []);
 
-    if (fromLocal) setAdminInfo(prev => ({ ...prev, ...fromLocal }));
+  // 2) Charger le cache local si existant (accélère l’affichage)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('admin');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setAdminInfo(prev => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
+  // 3) Source de vérité: /api/me → merge et met en cache
+  useEffect(() => {
     const token = localStorage.getItem('token');
-    if (!token || !API_URL) return;
+    if (!token) return; // pas connecté
+    if (!API_URL) return; // pas d’URL API → on reste avec le JWT et le cache
 
     fetch(`${API_URL}/api/me`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -60,22 +100,22 @@ const Header = () => {
           return null;
         }
         const data = await r.json();
-        // Attendu: { user: { name?, email, role, communeName?, photo? } }
         const u = data?.user || {};
         const next = {
           communeName: u.communeName || u.commune || '',
           name: u.name || '',
           email: u.email || '',
           photo: u.photo || '',
-          role: u.role || '' // ➕
+          role: u.role || adminInfo.role || '' // conserve le role si l’API ne le renvoie pas
         };
         setAdminInfo(next);
         localStorage.setItem('admin', JSON.stringify(next));
       })
       .catch(() => {
-        // Si l’API tombe, on garde le cache
+        // Si l’API tombe, on garde ce qu’on a (JWT + cache)
       });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [API_URL]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -89,14 +129,12 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [profileMenuOpen]);
 
-  // 🏷️ Texte dynamique sous l’avatar
   const badgeText =
     adminInfo.communeName?.trim() ||
     adminInfo.name?.trim() ||
     (adminInfo.email ? adminInfo.email.split('@')[0] : '') ||
     'Administrateur';
 
-  // (Optionnel) Badge rôle lisible
   const roleBadge =
     adminInfo.role === 'superadmin'
       ? 'SUPERADMINISTRATEUR'
@@ -137,9 +175,7 @@ const Header = () => {
                 />
               </div>
 
-              {/* Ligne 1 : commune / nom */}
               <span className="text-xs text-gray-700">{badgeText}</span>
-              {/* Ligne 2 : badge rôle (optionnel, si tu veux que ce soit visible) */}
               {roleBadge && (
                 <span className="text-[10px] font-semibold text-purple-700 tracking-wider">
                   {roleBadge}
@@ -172,7 +208,7 @@ const Header = () => {
                       🔄 Modifier les informations
                     </Link>
 
-                    {/* ⬇️ Afficher l’entrée Superadmin uniquement si role === 'superadmin' */}
+                    {/* Visible UNIQUEMENT si le rôle est superadmin (dès le JWT) */}
                     {adminInfo.role === 'superadmin' && (
                       <Link
                         to="/admins"

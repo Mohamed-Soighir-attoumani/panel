@@ -1,7 +1,8 @@
-// ChangerMotDePasse.jsx
+// src/pages/ChangerMotDePasse.jsx
 import React, { useState } from 'react';
 import { toast, ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { API_URL } from '../config';
 
 const ChangerMotDePasse = () => {
   const [oldPassword, setOldPassword] = useState('');
@@ -10,10 +11,10 @@ const ChangerMotDePasse = () => {
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-
-  const API_URL = process.env.REACT_APP_API_URL; // ex: https://backend-admin-tygd.onrender.com
+  const [loading, setLoading] = useState(false);
 
   const getPasswordStrength = (password) => {
+    if (!password) return '';
     if (password.length < 6) return 'Faible';
     if (/[A-Z]/.test(password) && /\d/.test(password) && /[!@#$%^&*]/.test(password)) return 'Fort';
     return 'Moyen';
@@ -23,10 +24,9 @@ const ChangerMotDePasse = () => {
     e.preventDefault();
 
     if (!API_URL) {
-      toast.error("Configuration manquante : REACT_APP_API_URL");
+      toast.error('Configuration manquante : REACT_APP_API_URL');
       return;
     }
-
     if (newPassword !== confirmPassword) {
       toast.error('❌ Les nouveaux mots de passe ne correspondent pas.');
       return;
@@ -40,7 +40,8 @@ const ChangerMotDePasse = () => {
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/change-password`, {
+      setLoading(true);
+      const resp = await fetch(`${API_URL}/api/change-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,18 +50,16 @@ const ChangerMotDePasse = () => {
         body: JSON.stringify({ oldPassword, newPassword }),
       });
 
-      const text = await response.text();
+      const text = await resp.text();
       const data = text ? JSON.parse(text) : {};
 
-      if (response.status === 401 || response.status === 403) {
-        // Token invalide/expiré
+      if (resp.status === 401 || resp.status === 403) {
         toast.error(data.message || 'Session expirée. Veuillez vous reconnecter.');
         localStorage.removeItem('token');
-        setTimeout(() => (window.location.href = '/login'), 1000);
+        setTimeout(() => (window.location.href = '/login'), 800);
         return;
       }
-
-      if (!response.ok) {
+      if (!resp.ok) {
         throw new Error(data.message || 'Erreur lors de la mise à jour.');
       }
 
@@ -68,8 +67,10 @@ const ChangerMotDePasse = () => {
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (error) {
-      toast.error(error.message || 'Erreur inconnue.');
+    } catch (err) {
+      toast.error(err.message || 'Erreur inconnue.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -91,11 +92,13 @@ const ChangerMotDePasse = () => {
                 value={oldPassword}
                 onChange={(e) => setOldPassword(e.target.value)}
                 required
+                autoComplete="current-password"
                 className="mt-1 w-full border border-gray-300 rounded px-3 py-2 pr-10"
               />
               <span
                 className="absolute right-3 top-3 text-sm cursor-pointer text-blue-500"
-                onClick={() => setShowOld(!showOld)}
+                onClick={() => setShowOld((v) => !v)}
+                title={showOld ? 'Masquer' : 'Afficher'}
               >
                 {showOld ? '👁️‍🗨️' : '🙈'}
               </span>
@@ -111,11 +114,13 @@ const ChangerMotDePasse = () => {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 required
+                autoComplete="new-password"
                 className="mt-1 w-full border border-gray-300 rounded px-3 py-2 pr-10"
               />
               <span
                 className="absolute right-3 top-3 text-sm cursor-pointer text-blue-500"
-                onClick={() => setShowNew(!showNew)}
+                onClick={() => setShowNew((v) => !v)}
+                title={showNew ? 'Masquer' : 'Afficher'}
               >
                 {showNew ? '👁️‍🗨️' : '🙈'}
               </span>
@@ -127,7 +132,7 @@ const ChangerMotDePasse = () => {
             )}
           </div>
 
-          {/* Confirmer le mot de passe */}
+          {/* Confirmer */}
           <div>
             <label className="block text-sm font-medium text-gray-700">Confirmer le mot de passe</label>
             <div className="relative">
@@ -136,11 +141,13 @@ const ChangerMotDePasse = () => {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
+                autoComplete="new-password"
                 className="mt-1 w-full border border-gray-300 rounded px-3 py-2 pr-10"
               />
               <span
                 className="absolute right-3 top-3 text-sm cursor-pointer text-blue-500"
-                onClick={() => setShowConfirm(!showConfirm)}
+                onClick={() => setShowConfirm((v) => !v)}
+                title={showConfirm ? 'Masquer' : 'Afficher'}
               >
                 {showConfirm ? '👁️‍🗨️' : '🙈'}
               </span>
@@ -149,9 +156,10 @@ const ChangerMotDePasse = () => {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition disabled:opacity-60"
           >
-            Valider
+            {loading ? 'Veuillez patienter…' : 'Valider'}
           </button>
         </form>
       </div>

@@ -1,13 +1,14 @@
-<!-- Fichier : admin-panel/index.html -->
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="fr">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Admin Panel</title>
   </head>
   <body>
+    <noscript>Activez JavaScript pour utiliser cette application.</noscript>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <!-- CRA injecte les <script> au build. Ne chargez PAS /src/main.jsx en prod -->
   </body>
 </html>

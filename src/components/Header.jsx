@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, LogOut } from 'lucide-react';
+import { Menu } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || '';
 
@@ -111,12 +111,10 @@ export default function Header() {
         ? location.pathname.split('/')[1].charAt(0).toUpperCase() + location.pathname.split('/')[1].slice(1)
         : 'Tableau de bord';
 
-  const badge =
-    (me.communeName || '').trim() ||
-    (me.name || '').trim() ||
-    (me.email ? me.email.split('@')[0] : '');
-
   const isSuperadmin = norm(me.role) === 'superadmin';
+  const badgeUnderAvatar = isSuperadmin
+    ? 'SUPERADMINISTRATEUR'
+    : ((me.communeName || '').trim());
 
   return (
     <>
@@ -130,11 +128,11 @@ export default function Header() {
         </div>
       )}
 
-      {/* ===== HEADER FIXE (mise en forme inspirée du 1er code) ===== */}
+      {/* ===== HEADER FIXE (sans logo à gauche) ===== */}
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black">
           <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
-            {/* Gauche : Logo + menu burger */}
+            {/* Gauche : uniquement le bouton burger (logo retiré) */}
             <div className="flex items-center space-x-4">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -143,25 +141,15 @@ export default function Header() {
               >
                 <Menu className="w-6 h-6 text-gray-600" />
               </button>
-
-              {/* Logo + lien dashboard */}
-              <Link to="/dashboard" className="flex items-center gap-2">
-                <img
-                  src={require('../assets/images/securidem-logo.png')}
-                  alt="Logo"
-                  className="h-10 w-10 object-contain"
-                />
-              </Link>
             </div>
 
-            {/* Titre centré (comme le 1er header) */}
+            {/* Titre centré */}
             <h1 className="absolute left-1/2 transform -translate-x-1/2 text-xl font-bold tracking-wide uppercase text-gray-700">
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar + déconnexion (style du 1er) + menu Profil (du 2e) */}
-            <div className="flex items-center space-x-4">
-              {/* Avatar (ouvre le menu profil) */}
+            {/* Droite : avatar + libellé (commune / superadmin) + menu Profil (déconnexion dedans) */}
+            <div className="relative flex flex-col items-center space-y-1">
               <div
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
@@ -175,16 +163,14 @@ export default function Header() {
                 />
               </div>
 
-              {/* Bouton Déconnexion (style du 1er header) */}
-              <button
-                onClick={handleLogout}
-                className="flex items-center space-x-2 bg-red-500 text-white px-3 py-2 rounded-lg hover:bg-red-600 transition"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="text-sm hidden sm:inline">Déconnexion</span>
-              </button>
+              {/* Sous l’avatar : commune ou SUPERADMINISTRATEUR */}
+              {badgeUnderAvatar ? (
+                <span className="text-[10px] font-semibold text-gray-700 tracking-wide uppercase">
+                  {badgeUnderAvatar}
+                </span>
+              ) : null}
 
-              {/* Menu Profil (du 2e header) */}
+              {/* Menu Profil (déconnexion ICI) */}
               <AnimatePresence>
                 {profileOpen && (
                   <motion.div
@@ -193,11 +179,11 @@ export default function Header() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
-                    className="absolute top-14 right-6 w-64 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
+                    className="absolute top-14 right-0 w-64 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
                   >
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
-                        {me.name || badge || 'Mon profil'}
+                        {me.name || (me.email ? me.email.split('@')[0] : 'Mon profil')}
                       </p>
                       <p className="text-xs text-gray-500">{me.email}</p>
                       {isSuperadmin && (
@@ -246,6 +232,14 @@ export default function Header() {
                     >
                       ⚙️ Paramètres
                     </Link>
+
+                    {/* Déconnexion déplacée ici */}
+                    <button
+                      onClick={handleLogout}
+                      className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-200"
+                    >
+                      🚪 Déconnexion
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -254,7 +248,7 @@ export default function Header() {
         </header>
       </div>
 
-      {/* ===== Bande d’urgence FIXE sous le header (comme le 1er code) ===== */}
+      {/* ===== Bande d’urgence FIXE sous le header (inchangée) ===== */}
       <AnimatePresence>
         {location.pathname.startsWith('/incident') && (
           <motion.div
@@ -278,7 +272,7 @@ export default function Header() {
         )}
       </AnimatePresence>
 
-      {/* ===== Menu mobile latéral (du 2e header) ===== */}
+      {/* ===== Menu mobile latéral ===== */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -315,6 +309,13 @@ export default function Header() {
                 👥 Administrateurs (communes)
               </Link>
             )}
+            {/* Optionnel : Déconnexion aussi dans le menu mobile */}
+            <button
+              onClick={() => { setMenuOpen(false); handleLogout(); }}
+              className="block w-full text-left py-2 mt-4 text-red-300 hover:text-white"
+            >
+              🚪 Déconnexion
+            </button>
           </motion.div>
         )}
       </AnimatePresence>

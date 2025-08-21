@@ -1,3 +1,4 @@
+// src/components/Header.jsx
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -8,7 +9,6 @@ const API_URL = process.env.REACT_APP_API_URL || '';
 function decodeJwt(token) {
   try { return JSON.parse(atob(token.split('.')[1] || '')); } catch { return null; }
 }
-
 function norm(v) { return (v || '').toString().trim().toLowerCase(); }
 
 export default function Header() {
@@ -31,7 +31,6 @@ export default function Header() {
     role: '',
   });
 
-  // Bandeau “quitter l’usurpation”
   const quitImpersonation = () => {
     const orig = localStorage.getItem('token_orig');
     if (orig) {
@@ -44,9 +43,8 @@ export default function Header() {
     }
   };
 
-  // Récupération /api/me (source de vérité)
+  // Pré-hydrate avec le JWT puis va chercher /api/me
   useEffect(() => {
-    // Hydrate rapidement depuis le token au besoin (pour ne pas afficher vide)
     if (payload) {
       setMe(prev => ({
         ...prev,
@@ -69,33 +67,25 @@ export default function Header() {
         }
         const data = await r.json();
         const u = data?.user || {};
-        setMe({
+        const merged = {
           email: u.email || '',
           name: u.name || '',
           communeName: u.communeName || '',
           photo: u.photo || '',
           role: u.role || payload?.role || '',
-        });
-        // cache léger si tu veux
-        localStorage.setItem('admin', JSON.stringify({
-          email: u.email || '',
-          name: u.name || '',
-          communeName: u.communeName || '',
-          photo: u.photo || '',
-          role: u.role || payload?.role || '',
-        }));
+        };
+        setMe(merged);
+        localStorage.setItem('admin', JSON.stringify(merged));
       })
       .catch(() => {
-        // on reste avec le payload + cache
         try {
           const raw = localStorage.getItem('admin');
           if (raw) setMe(prev => ({ ...prev, ...JSON.parse(raw) }));
         } catch {}
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // exécuter au montage
 
-  // Fermer menu profil si clic hors
+  // Fermer le menu profil au clic hors
   useEffect(() => {
     const handler = (e) => {
       if (profileRef.current && !profileRef.current.contains(e.target)) {
@@ -106,7 +96,6 @@ export default function Header() {
     return () => document.removeEventListener('mousedown', handler);
   }, [profileOpen]);
 
-  // Déconnexion
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('token_orig');
@@ -130,7 +119,6 @@ export default function Header() {
 
   return (
     <header className="w-full bg-white shadow-md relative z-50">
-      {/* Bandeau impersonation */}
       {isImpersonated && (
         <div className="w-full bg-yellow-100 text-yellow-900 text-sm py-1 text-center">
           Mode superadmin : vous utilisez un autre compte.
@@ -142,7 +130,7 @@ export default function Header() {
 
       <div className="border-b border-gray-200">
         <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
-          {/* Gauche: logo + burger */}
+          {/* Gauche */}
           <div className="flex items-center gap-3">
             <button
               className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -152,7 +140,6 @@ export default function Header() {
               <Menu className="w-6 h-6 text-gray-600" />
             </button>
 
-            {/* Logo (remplace le src par ton chemin public si besoin) */}
             <Link to="/dashboard" className="flex items-center gap-2">
               <img
                 src="/logo192.png"
@@ -166,12 +153,12 @@ export default function Header() {
             </Link>
           </div>
 
-          {/* Titre centré */}
+          {/* Titre */}
           <h1 className="absolute left-1/2 -translate-x-1/2 text-xl font-bold tracking-wide uppercase text-gray-700">
             {pageTitle}
           </h1>
 
-          {/* Droite: profil */}
+          {/* Profil */}
           <div className="relative flex flex-col items-center space-y-1">
             <div
               onClick={() => setProfileOpen(!profileOpen)}
@@ -187,7 +174,6 @@ export default function Header() {
             </div>
             {badge ? <span className="text-xs text-gray-700">{badge}</span> : null}
 
-            {/* Menu profil */}
             <AnimatePresence>
               {profileOpen && (
                 <motion.div
@@ -263,7 +249,7 @@ export default function Header() {
         </div>
       </div>
 
-      {/* Menu mobile latéral minimal si tu veux l’étendre */}
+      {/* Menu mobile minimal */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div

@@ -83,7 +83,6 @@ const Header = () => {
   }, []);
 
   // 3) Source de vérité: /api/me → merge et met en cache
-  //    ⚠️ On le lance une seule fois au montage (pas besoin d'ignorer une règle ESLint)
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token || !API_URL) return;
@@ -111,7 +110,6 @@ const Header = () => {
       .catch(() => {
         // Si l’API tombe, on garde JWT + cache
       });
-    // ← pas de commentaire eslint ici
   }, []); // exécuter une fois au montage
 
   useEffect(() => {
@@ -126,16 +124,11 @@ const Header = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [profileMenuOpen]);
 
-  const badgeText =
-    adminInfo.communeName?.trim() ||
-    adminInfo.name?.trim() ||
-    (adminInfo.email ? adminInfo.email.split('@')[0] : '') ||
-    'Administrateur';
-
-  const roleBadge =
+  // ✅ Un seul label compact: SUPERADMINISTRATEUR ou le nom de la commune / nom
+  const displayLabel =
     adminInfo.role === 'superadmin'
       ? 'SUPERADMINISTRATEUR'
-      : (adminInfo.role === 'admin' ? 'ADMINISTRATEUR' : '');
+      : (adminInfo.communeName?.trim() || adminInfo.name?.trim() || '');
 
   return (
     <>
@@ -159,7 +152,7 @@ const Header = () => {
             </h1>
 
             {/* Profil */}
-            <div className="relative flex flex-col items-center space-y-1">
+            <div className="relative flex flex-col items-center space-y-0">{/* ← pas de space-y-1 */}
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
@@ -172,12 +165,12 @@ const Header = () => {
                 />
               </div>
 
-              <span className="text-xs text-gray-700">{badgeText}</span>
-              {roleBadge && (
-                <span className="text-[10px] font-semibold text-purple-700 tracking-wider">
-                  {roleBadge}
+              {/* Un seul petit label, pas de fallback "Administrateur" */}
+              {displayLabel ? (
+                <span className="text-[11px] leading-4 text-gray-700 mt-0.5">
+                  {displayLabel}
                 </span>
-              )}
+              ) : null}
 
               {/* Menu Profil */}
               <AnimatePresence>
@@ -192,7 +185,7 @@ const Header = () => {
                   >
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
-                        {adminInfo.name || badgeText}
+                        {adminInfo.name || adminInfo.communeName || adminInfo.email}
                       </p>
                       <p className="text-xs text-gray-500">{adminInfo.email}</p>
                     </div>

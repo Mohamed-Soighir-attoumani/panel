@@ -1,12 +1,14 @@
+// src/App.jsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
+// Pages
 import LoginPage from "./pages/LoginPage";
-import SuperadminAdmins from './pages/SuperadminAdmins.jsx';
+import SuperadminAdmins from "./pages/SuperadminAdmins";
 import AdminProfile from "./pages/AdminProfile";
-import ChangerPhoto from './pages/ChangerPhoto';
+import ChangerPhoto from "./pages/ChangerPhoto";
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
@@ -15,19 +17,41 @@ import ArticlePage from "./pages/ArticlePage";
 import ArticleListPage from "./pages/ArticleListPage";
 import ProjectPage from "./pages/ProjectPage";
 import ProjectListPage from "./pages/ProjectListPage";
+
+// Layout
 import Layout from "./components/Layout";
+
+// Guards
+import PrivateRoute from "./routes/PrivateRoute";
+import RequireRole from "./routes/RequireRole";
 
 const App = () => {
   return (
     <>
       <Routes>
-        {/* Route sans layout */}
-        <Route path="/" element={<Navigate to="/login" />} />
+        {/* Routes publiques */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Routes avec layout */}
-        <Route element={<Layout />}>
-          <Route path="/admins" element={<SuperadminAdmins />} />
+        {/* Routes privées avec Layout */}
+        <Route
+          element={
+            <PrivateRoute>
+              <Layout />
+            </PrivateRoute>
+          }
+        >
+          {/* Page superadmin uniquement */}
+          <Route
+            path="/admins"
+            element={
+              <RequireRole role="superadmin">
+                <SuperadminAdmins />
+              </RequireRole>
+            }
+          />
+
+          {/* Pages accessibles à tout admin connecté */}
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
           <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
@@ -39,9 +63,15 @@ const App = () => {
           <Route path="/projects" element={<ProjectPage />} />
           <Route path="/projects/liste" element={<ProjectListPage />} />
         </Route>
+
+        {/* 404 */}
+        <Route
+          path="*"
+          element={<div style={{ padding: "2rem" }}>Page introuvable</div>}
+        />
       </Routes>
 
-      {/* ✅ Affiche les notifications toast */}
+      {/* ✅ Notifications toast */}
       <ToastContainer />
     </>
   );

@@ -78,7 +78,6 @@ export default function Header() {
         localStorage.setItem('admin', JSON.stringify(merged));
       })
       .catch(() => {
-        // fallback cache local
         try {
           const raw = localStorage.getItem('admin');
           if (raw) setMe(prev => ({ ...prev, ...JSON.parse(raw) }));
@@ -116,11 +115,13 @@ export default function Header() {
     ? 'SUPERADMINISTRATEUR'
     : ((me.communeName || '').trim());
 
+  // Hauteur cible du header ~56px (h-10 avatar + bordure + py-2)
+  // => on fixe les barres sous le header à top-[56px]
   return (
     <>
-      {/* ===== BANNIÈRE IMPERSONATION (si superadmin utilise un autre compte) ===== */}
+      {/* Bannière impersonation (compacte, ne change pas la hauteur du header) */}
       {isImpersonated && (
-        <div className="w-full bg-yellow-100 text-yellow-900 text-sm py-1 text-center z-50">
+        <div className="w-full bg-yellow-100 text-yellow-900 text-xs sm:text-sm py-1 text-center z-50">
           Mode superadmin : vous utilisez un autre compte.
           <button onClick={quitImpersonation} className="ml-3 underline">
             Revenir à mon compte
@@ -128,12 +129,12 @@ export default function Header() {
         </div>
       )}
 
-      {/* ===== HEADER FIXE (sans logo à gauche) ===== */}
+      {/* HEADER FIXE compact */}
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black">
-          <div className="flex items-center justify-between px-6 py-3 max-w-screen-xl mx-auto">
-            {/* Gauche : uniquement le bouton burger (logo retiré) */}
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-2 max-w-screen-xl mx-auto">
+            {/* Gauche : bouton burger (logo retiré) */}
+            <div className="flex items-center">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
                 onClick={() => setMenuOpen(!menuOpen)}
@@ -144,12 +145,12 @@ export default function Header() {
             </div>
 
             {/* Titre centré */}
-            <h1 className="absolute left-1/2 transform -translate-x-1/2 text-xl font-bold tracking-wide uppercase text-gray-700">
+            <h1 className="absolute left-1/2 -translate-x-1/2 text-base sm:text-lg md:text-xl font-bold tracking-wide uppercase text-gray-700">
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar + libellé (commune / superadmin) + menu Profil (déconnexion dedans) */}
-            <div className="relative flex flex-col items-center space-y-1">
+            {/* Droite : avatar + badge très compact + menu profil */}
+            <div className="relative flex flex-col items-center leading-none">
               <div
                 onClick={() => setProfileOpen(!profileOpen)}
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
@@ -163,14 +164,14 @@ export default function Header() {
                 />
               </div>
 
-              {/* Sous l’avatar : commune ou SUPERADMINISTRATEUR */}
+              {/* Badge compact (ne crée pas d’espace vertical supplémentaire) */}
               {badgeUnderAvatar ? (
-                <span className="text-[10px] font-semibold text-gray-700 tracking-wide uppercase">
+                <span className="text-[10px] font-semibold text-gray-700 tracking-wide uppercase mt-0.5">
                   {badgeUnderAvatar}
                 </span>
               ) : null}
 
-              {/* Menu Profil (déconnexion ICI) */}
+              {/* Menu Profil (déconnexion ici) */}
               <AnimatePresence>
                 {profileOpen && (
                   <motion.div
@@ -179,7 +180,7 @@ export default function Header() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
-                    className="absolute top-14 right-0 w-64 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
+                    className="absolute top-12 right-0 w-64 bg-white border border-gray-200 shadow-lg rounded-md overflow-hidden z-50"
                   >
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
@@ -233,7 +234,6 @@ export default function Header() {
                       ⚙️ Paramètres
                     </Link>
 
-                    {/* Déconnexion déplacée ici */}
                     <button
                       onClick={handleLogout}
                       className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-200"
@@ -248,7 +248,7 @@ export default function Header() {
         </header>
       </div>
 
-      {/* ===== Bande d’urgence FIXE sous le header (inchangée) ===== */}
+      {/* Bande d’urgence FIXE sous le header (ajustée à 56px) */}
       <AnimatePresence>
         {location.pathname.startsWith('/incident') && (
           <motion.div
@@ -257,10 +257,10 @@ export default function Header() {
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.5, ease: 'easeInOut' }}
-            className="fixed top-[64px] z-40 w-full lg:ml-64 lg:w-[calc(100%-16rem)] bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
+            className="fixed top-[56px] z-40 w-full lg:ml-64 lg:w-[calc(100%-16rem)] bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
           >
             <div className="px-4 py-2">
-              <div className="flex flex-wrap justify-center gap-2 text-sm font-medium text-gray-800 text-center">
+              <div className="flex flex-wrap justify-center gap-2 text-xs sm:text-sm font-medium text-gray-800 text-center">
                 <p><strong>👮 Police :</strong> 17</p>
                 <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>
                 <p><strong>🚒 Pompiers :</strong> 18</p>
@@ -272,7 +272,7 @@ export default function Header() {
         )}
       </AnimatePresence>
 
-      {/* ===== Menu mobile latéral ===== */}
+      {/* Menu mobile latéral (top aligné à 56px) */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -280,7 +280,7 @@ export default function Header() {
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ duration: 0.3 }}
-            className="fixed top-16 left-0 w-52 h-[calc(100vh-64px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
+            className="fixed top-[56px] left-0 w-52 h-[calc(100vh-56px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
           >
             <p className="mb-4 font-bold">Menu</p>
             <Link to="/dashboard" onClick={() => setMenuOpen(false)} className="block py-2">
@@ -309,7 +309,6 @@ export default function Header() {
                 👥 Administrateurs (communes)
               </Link>
             )}
-            {/* Optionnel : Déconnexion aussi dans le menu mobile */}
             <button
               onClick={() => { setMenuOpen(false); handleLogout(); }}
               className="block w-full text-left py-2 mt-4 text-red-300 hover:text-white"

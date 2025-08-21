@@ -6,6 +6,7 @@ import "react-toastify/dist/ReactToastify.css";
 import LoginPage from "./pages/LoginPage";
 import SuperadminAdmins from './pages/SuperadminAdmins.jsx';
 import AdminProfile from "./pages/AdminProfile";
+import ChangerPhoto from './pages/ChangerPhoto';
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
@@ -28,6 +29,7 @@ const App = () => {
         <Route element={<Layout />}>
           <Route path="/admins" element={<SuperadminAdmins />} />
           <Route path="/profil" element={<AdminProfile />} />
+          <Route path="/changer-photo" element={<ChangerPhoto />} />
           <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />

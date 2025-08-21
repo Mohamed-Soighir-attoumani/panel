@@ -1,5 +1,5 @@
 // src/pages/SuperadminAdmins.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -54,7 +54,7 @@ export default function SuperadminAdmins() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Debounce du filtre (évite rafales d'appels)
+  // Debounce du filtre
   useEffect(() => {
     const t = setTimeout(() => setDebouncedFilter(communeFilter.trim()), 400);
     return () => clearTimeout(t);
@@ -87,8 +87,8 @@ export default function SuperadminAdmins() {
     })();
   }, [token]);
 
-  // Liste des admins
-  const fetchAdmins = async (q = "") => {
+  // Liste des admins — **useCallback** pour stabilité
+  const fetchAdmins = useCallback(async (q = "") => {
     if (!API_URL || !token) return;
 
     // Annule la requête précédente si elle est en cours
@@ -108,7 +108,7 @@ export default function SuperadminAdmins() {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
         signal: controller.signal,
-        validateStatus: (s) => s >= 200 && s < 500, // capter 4xx/5xx proprement
+        validateStatus: (s) => s >= 200 && s < 500,
       });
 
       if (res.status >= 400) {
@@ -116,7 +116,6 @@ export default function SuperadminAdmins() {
       }
 
       safeSet(setAdmins)(Array.isArray(res.data?.admins) ? res.data.admins : []);
-      // reset pagination si filtre change beaucoup
       safeSet(setPage)(1);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;
@@ -124,15 +123,14 @@ export default function SuperadminAdmins() {
     } finally {
       safeSet(setLoadingList)(false);
     }
-  };
+  }, [token]);
 
-  // Charge la liste si superadmin
+  // Charge la liste si superadmin — **dépend** de fetchAdmins
   useEffect(() => {
     if (me?.role === "superadmin") {
       fetchAdmins(debouncedFilter);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.role, debouncedFilter]);
+  }, [me?.role, debouncedFilter, fetchAdmins]);
 
   // Création d’un admin
   const handleCreate = async (e) => {
@@ -506,7 +504,7 @@ export default function SuperadminAdmins() {
                                 onClick={() => handleReset(id)}
                                 className="px-2 py-1 rounded bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
                                 title="Réinitialiser le mot de passe"
-                                disabled={isTargetSuper} // ne pas reset superadmin par défaut
+                                disabled={isTargetSuper}
                               >
                                 Reset
                               </button>

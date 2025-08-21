@@ -25,6 +25,9 @@
     "react-toastify": "^11.0.5",
     "recharts": "^2.15.3"
   },
+  "devDependencies": {
+    "eslint-plugin-react-hooks": "^4.6.2"
+  },
   "browserslist": {
     "production": [
       ">0.2%",

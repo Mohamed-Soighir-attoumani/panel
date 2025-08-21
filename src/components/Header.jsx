@@ -5,19 +5,19 @@ import { Menu } from 'lucide-react';
 
 const API_URL = process.env.REACT_APP_API_URL || '';
 
-function safeDecodeJwtRole() {
+function decodeJwtSafe() {
   try {
     const t = localStorage.getItem('token');
     if (!t) return null;
     const payload = JSON.parse(atob(t.split('.')[1] || ''));
-    return {
-      role: payload?.role || '',
-      communeName: payload?.communeName || '',
-      email: payload?.email || '',
-    };
+    return payload || null;
   } catch {
     return null;
   }
+}
+
+function norm(str) {
+  return (str || '').toString().trim().toLowerCase();
 }
 
 const Header = () => {
@@ -32,15 +32,15 @@ const Header = () => {
     name: '',
     email: '',
     photo: '',
-    role: '' // 'admin' | 'superadmin'
+    role: '', // 'admin' | 'superadmin'
   });
 
   const pageTitle =
     location.pathname === '/dashboard'
       ? 'Tableau de bord'
       : location.pathname.split('/')[1]
-          ? location.pathname.split('/')[1].charAt(0).toUpperCase() + location.pathname.split('/')[1].slice(1)
-          : 'Tableau de bord';
+        ? location.pathname.split('/')[1].charAt(0).toUpperCase() + location.pathname.split('/')[1].slice(1)
+        : 'Tableau de bord';
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -48,41 +48,47 @@ const Header = () => {
     navigate('/login');
   };
 
-  // 1) Fallback instantané : lire role & commune depuis le JWT
+  // 1) Lecture immédiate du JWT (source la plus fiable)
   useEffect(() => {
-    const decoded = safeDecodeJwtRole();
-    if (decoded) {
-      setAdminInfo(prev => ({
-        ...prev,
-        ...decoded,
-      }));
-      const cached = localStorage.getItem('admin');
-      if (!cached) {
-        localStorage.setItem('admin', JSON.stringify({
-          communeName: decoded.communeName || '',
-          name: '',
-          email: decoded.email || '',
-          photo: '',
-          role: decoded.role || ''
-        }));
+    const p = decodeJwtSafe();
+    if (p) {
+      const next = {
+        // on pose ce qu’on a (sans écraser par des vides plus tard)
+        communeName: p.communeName || '',
+        name: '',
+        email: p.email || '',
+        photo: '',
+        role: norm(p.role), // normalisé
+      };
+      setAdminInfo(prev => ({ ...prev, ...next, role: next.role || prev.role }));
+      // hydrate le cache s’il n’existe pas
+      if (!localStorage.getItem('admin')) {
+        localStorage.setItem('admin', JSON.stringify(next));
       }
+      // Debug utile : un log une seule fois
+      console.debug('[Header] role from JWT =', next.role);
     }
   }, []);
 
-  // 2) Charger le cache local si existant (accélère l’affichage)
+  // 2) Charger le cache local si existant (sans écraser un rôle déjà connu)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('admin');
       if (raw) {
         const parsed = JSON.parse(raw);
-        setAdminInfo(prev => ({ ...prev, ...parsed }));
+        const cachedRole = norm(parsed.role);
+        setAdminInfo(prev => ({
+          communeName: parsed.communeName || prev.communeName,
+          name: parsed.name || prev.name,
+          email: parsed.email || prev.email,
+          photo: parsed.photo || prev.photo,
+          role: prev.role || cachedRole, // ⚠️ ne PAS écraser un rôle déjà présent
+        }));
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* noop */ }
   }, []);
 
-  // 3) Source de vérité: /api/me → merge et met en cache
+  // 3) Source de vérité serveur /api/me (mais on ne casse jamais un rôle déjà connu)
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token || !API_URL) return;
@@ -97,38 +103,42 @@ const Header = () => {
         }
         const data = await r.json();
         const u = data?.user || {};
-        const next = {
-          communeName: u.communeName || u.commune || '',
-          name: u.name || '',
-          email: u.email || '',
-          photo: u.photo || '',
-          role: u.role || adminInfo.role || ''
-        };
-        setAdminInfo(next);
-        localStorage.setItem('admin', JSON.stringify(next));
+        setAdminInfo(prev => {
+          const merged = {
+            communeName: u.communeName || u.commune || prev.communeName || '',
+            name: u.name || prev.name || '',
+            email: u.email || prev.email || '',
+            photo: u.photo || prev.photo || '',
+            // rôle : on garde celui qu’on a déjà s’il est défini
+            role: prev.role || norm(u.role) || '',
+          };
+          localStorage.setItem('admin', JSON.stringify(merged));
+          console.debug('[Header] role after /api/me =', merged.role);
+          return merged;
+        });
       })
-      .catch(() => {
-        // Si l’API tombe, on garde JWT + cache
-      });
-  }, []); // exécuter une fois au montage
+      .catch(() => { /* garder le JWT + cache */ });
+  }, []);
 
+  // Fermer le menu profil si click extérieur
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
         setProfileMenuOpen(false);
       }
     };
-    if (profileMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
+    if (profileMenuOpen) document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [profileMenuOpen]);
 
-  // ✅ Un seul label compact: SUPERADMINISTRATEUR ou le nom de la commune / nom
-  const displayLabel =
-    adminInfo.role === 'superadmin'
-      ? 'SUPERADMINISTRATEUR'
-      : (adminInfo.communeName?.trim() || adminInfo.name?.trim() || '');
+  // Texte badge : commune > nom > email-sans-domaine
+  const badgeText =
+    adminInfo.communeName?.trim() ||
+    adminInfo.name?.trim() ||
+    (adminInfo.email ? adminInfo.email.split('@')[0] : '') ||
+    ''; // ← plus de "Administrateur" pour réduire la hauteur
+
+  const isSuperadmin = norm(adminInfo.role) === 'superadmin';
 
   return (
     <>
@@ -152,11 +162,11 @@ const Header = () => {
             </h1>
 
             {/* Profil */}
-            <div className="relative flex flex-col items-center space-y-0">{/* ← pas de space-y-1 */}
+            <div className="relative flex flex-col items-center space-y-1">
               <div
                 onClick={() => setProfileMenuOpen(!profileMenuOpen)}
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
-                title="Profil administrateur"
+                title="Profil"
               >
                 <img
                   src={adminInfo.photo || '/logo192.png'}
@@ -165,11 +175,9 @@ const Header = () => {
                 />
               </div>
 
-              {/* Un seul petit label, pas de fallback "Administrateur" */}
-              {displayLabel ? (
-                <span className="text-[11px] leading-4 text-gray-700 mt-0.5">
-                  {displayLabel}
-                </span>
+              {/* On n’affiche qu’une seule ligne courte pour éviter d’augmenter la hauteur */}
+              {badgeText ? (
+                <span className="text-xs text-gray-700">{badgeText}</span>
               ) : null}
 
               {/* Menu Profil */}
@@ -185,9 +193,14 @@ const Header = () => {
                   >
                     <div className="px-4 py-3 border-b border-gray-100">
                       <p className="font-medium text-gray-800">
-                        {adminInfo.name || adminInfo.communeName || adminInfo.email}
+                        {adminInfo.name || badgeText || 'Mon profil'}
                       </p>
                       <p className="text-xs text-gray-500">{adminInfo.email}</p>
+                      {isSuperadmin && (
+                        <p className="text-[10px] font-semibold text-purple-700 tracking-wider mt-1">
+                          SUPERADMINISTRATEUR
+                        </p>
+                      )}
                     </div>
 
                     <Link
@@ -198,7 +211,8 @@ const Header = () => {
                       🔄 Modifier les informations
                     </Link>
 
-                    {adminInfo.role === 'superadmin' && (
+                    {/* 👇 Le lien n’apparaît QUE si superadmin */}
+                    {isSuperadmin && (
                       <Link
                         to="/admins"
                         className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
@@ -267,7 +281,7 @@ const Header = () => {
         )}
       </AnimatePresence>
 
-      {/* Menu mobile latéral */}
+      {/* Menu mobile latéral (à compléter si besoin) */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -277,7 +291,12 @@ const Header = () => {
             transition={{ duration: 0.3 }}
             className="fixed top-16 left-0 w-52 h-[calc(100vh-64px)] bg-gray-900 text-white p-6 z-40 shadow-lg lg:hidden"
           >
-            <p className="mb-4 font-bold">Menu mobile (à compléter)</p>
+            <p className="mb-4 font-bold">Menu mobile</p>
+            {isSuperadmin && (
+              <Link to="/admins" onClick={() => setMenuOpen(false)} className="block py-2">
+                👥 Administrateurs (communes)
+              </Link>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

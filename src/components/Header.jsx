@@ -116,7 +116,7 @@ export default function Header() {
     : ((me.communeName || '').trim());
 
   // Hauteur cible du header ~56px (h-10 avatar + bordure + py-2)
-  // => on fixe les barres sous le header à top-[60px]
+  // => on fixe les barres sous le header à top-[65px]
   return (
     <>
       {/* Bannière impersonation (compacte, ne change pas la hauteur du header) */}

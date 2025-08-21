@@ -88,37 +88,38 @@ const Header = () => {
     } catch { /* noop */ }
   }, []);
 
-  // 3) Source de vérité serveur /api/me (mais on ne casse jamais un rôle déjà connu)
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token || !API_URL) return;
+ // 3) Source de vérité serveur /api/me (on privilégie TOUJOURS le role renvoyé par le serveur)
+useEffect(() => {
+  const token = localStorage.getItem('token');
+  if (!token || !API_URL) return;
 
-    fetch(`${API_URL}/api/me`, {
-      headers: { Authorization: `Bearer ${token}` },
+  fetch(`${API_URL}/api/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then(async (r) => {
+      if (r.status === 401 || r.status === 403) {
+        handleLogout();
+        return null;
+      }
+      const data = await r.json();
+      const u = data?.user || {};
+      setAdminInfo(prev => {
+        const serverRole = norm(u.role); // 'superadmin' ou 'admin'
+        const merged = {
+          communeName: u.communeName || u.commune || prev.communeName || '',
+          name: u.name || prev.name || '',
+          email: u.email || prev.email || '',
+          photo: u.photo || prev.photo || '',
+          // 🔑 clé du correctif : si le serveur donne un role, on l'utilise !
+          role: serverRole || prev.role || '',
+        };
+        localStorage.setItem('admin', JSON.stringify(merged));
+        console.debug('[Header] role after /api/me =', merged.role);
+        return merged;
+      });
     })
-      .then(async (r) => {
-        if (r.status === 401 || r.status === 403) {
-          handleLogout();
-          return null;
-        }
-        const data = await r.json();
-        const u = data?.user || {};
-        setAdminInfo(prev => {
-          const merged = {
-            communeName: u.communeName || u.commune || prev.communeName || '',
-            name: u.name || prev.name || '',
-            email: u.email || prev.email || '',
-            photo: u.photo || prev.photo || '',
-            // rôle : on garde celui qu’on a déjà s’il est défini
-            role: prev.role || norm(u.role) || '',
-          };
-          localStorage.setItem('admin', JSON.stringify(merged));
-          console.debug('[Header] role after /api/me =', merged.role);
-          return merged;
-        });
-      })
-      .catch(() => { /* garder le JWT + cache */ });
-  }, []);
+    .catch(() => { /* garder le JWT + cache */ });
+}, []);
 
   // Fermer le menu profil si click extérieur
   useEffect(() => {

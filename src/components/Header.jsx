@@ -194,7 +194,7 @@ export default function Header() {
                       )}
                     </div>
 
-                    {/* 👇 Affiché uniquement pour le superadmin */}
+                    {/* 👇 Liens visibles uniquement pour le superadmin */}
                     {isSuperadmin && (
                       <Link
                         to="/profil"
@@ -212,6 +212,16 @@ export default function Header() {
                         onClick={() => setProfileOpen(false)}
                       >
                         👥 Administrateurs
+                      </Link>
+                    )}
+
+                    {isSuperadmin && (
+                      <Link
+                        to="/utilisateurs"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                        onClick={() => setProfileOpen(false)}
+                      >
+                        👤 Utilisateurs
                       </Link>
                     )}
 
@@ -310,6 +320,11 @@ export default function Header() {
             {isSuperadmin && (
               <Link to="/admins" onClick={() => setMenuOpen(false)} className="block py-2">
                 👥 Administrateurs (communes)
+              </Link>
+            )}
+            {isSuperadmin && (
+              <Link to="/utilisateurs" onClick={() => setMenuOpen(false)} className="block py-2">
+                👤 Utilisateurs
               </Link>
             )}
             <button

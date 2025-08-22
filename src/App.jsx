@@ -7,6 +7,7 @@ import "react-toastify/dist/ReactToastify.css";
 // Pages
 import LoginPage from "./pages/LoginPage";
 import SuperadminAdmins from "./pages/SuperadminAdmins";
+import Utilisateurs from './pages/utilisateurs.jsx';
 import AdminProfile from "./pages/AdminProfile";
 import ChangerPhoto from "./pages/ChangerPhoto";
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
@@ -53,6 +54,7 @@ const App = () => {
 
           {/* Pages accessibles à tout admin connecté */}
           <Route path="/profil" element={<AdminProfile />} />
+          <Route path="/utilisateurs" element={<Utilisateurs />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
           <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
           <Route path="/dashboard" element={<DashboardPage />} />

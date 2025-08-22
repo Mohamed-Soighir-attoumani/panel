@@ -111,11 +111,26 @@ export default function SuperadminAdmins() {
         validateStatus: (s) => s >= 200 && s < 500,
       });
 
+      if (res.status === 401) {
+        toast.error("Session expirée. Veuillez vous reconnecter.");
+        localStorage.removeItem("token");
+        setTimeout(() => (window.location.href = "/login"), 500);
+        return;
+      }
+      if (res.status === 403) {
+        throw new Error(res.data?.message || "Accès interdit");
+      }
       if (res.status >= 400) {
         throw new Error(res.data?.message || `Erreur API (${res.status})`);
       }
 
-      safeSet(setAdmins)(Array.isArray(res.data?.admins) ? res.data.admins : []);
+      // 👇 Correction : accepte {items} (nouvelle route) ou {admins} (ancienne)
+      const list =
+        Array.isArray(res.data?.items) ? res.data.items :
+        Array.isArray(res.data?.admins) ? res.data.admins :
+        [];
+
+      safeSet(setAdmins)(list);
       safeSet(setPage)(1);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;

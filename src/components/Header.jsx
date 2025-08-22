@@ -194,13 +194,16 @@ export default function Header() {
                       )}
                     </div>
 
-                    <Link
-                      to="/profil"
-                      className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
-                      onClick={() => setProfileOpen(false)}
-                    >
-                      🔄 Modifier les informations
-                    </Link>
+                    {/* 👇 Affiché uniquement pour le superadmin */}
+                    {isSuperadmin && (
+                      <Link
+                        to="/profil"
+                        className="block px-4 py-2 text-sm hover:bg-gray-100 text-gray-700"
+                        onClick={() => setProfileOpen(false)}
+                      >
+                        🔄 Modifier les informations
+                      </Link>
+                    )}
 
                     {isSuperadmin && (
                       <Link

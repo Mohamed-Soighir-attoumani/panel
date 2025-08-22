@@ -1,3 +1,4 @@
+// src/pages/DashboardPage.jsx
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
@@ -21,15 +22,39 @@ const DashboardPage = () => {
   const [deviceCount, setDeviceCount] = useState(0);
   const [incidentTotal, setIncidentTotal] = useState(0);
 
+  const token = typeof window !== "undefined" ? (localStorage.getItem("token") || "") : "";
+  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+  const handleAuthError = (err) => {
+    const status = err?.response?.status;
+    if (status === 401 || status === 403) {
+      // session expirée ou accès interdit -> on renvoie au login
+      localStorage.removeItem("token");
+      localStorage.removeItem("token_orig");
+      window.location.href = "/login";
+      return true;
+    }
+    return false;
+  };
+
   const fetchData = async () => {
     try {
-      const incidentRes = await axios.get(`${API_URL}/api/incidents?period=${period}`);
+      const incidentRes = await axios.get(
+        `${API_URL}/api/incidents?period=${period}`,
+        { headers: authHeaders }
+      );
       const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
 
-      const notifRes = await axios.get(`${API_URL}/api/notifications`);
+      const notifRes = await axios.get(
+        `${API_URL}/api/notifications`,
+        { headers: authHeaders }
+      );
       const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
 
-      const totalRes = await axios.get(`${API_URL}/api/incidents/count?period=${period}`);
+      const totalRes = await axios.get(
+        `${API_URL}/api/incidents/count?period=${period}`,
+        { headers: authHeaders }
+      );
       const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
@@ -49,20 +74,27 @@ const DashboardPage = () => {
         }))
       ]);
     } catch (err) {
-      console.error("Erreur fetchData:", err);
+      if (!handleAuthError(err)) {
+        console.error("Erreur fetchData:", err);
+      }
     }
   };
 
   const fetchDeviceCount = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/devices/count`);
+      const res = await axios.get(`${API_URL}/api/devices/count`, {
+        headers: authHeaders,
+      });
+      // Le backend renvoie { count, active, activeDays }
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
       } else {
         console.warn("Réponse device count inattendue:", res.data);
       }
     } catch (err) {
-      console.error("Erreur fetchDeviceCount:", err);
+      if (!handleAuthError(err)) {
+        console.error("Erreur fetchDeviceCount:", err);
+      }
     }
   };
 
@@ -74,7 +106,9 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
-  }, [period]);
+    // on relance aussi si le token change (par ex. impersonation)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, token]);
 
   const groupIncidentsByMonth = () => {
     const monthMap = {};
@@ -234,9 +268,11 @@ const DashboardPage = () => {
           <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
         </div>
       </div>
+
       <div className="mt-6">
-      <DevicesTable />
+        <DevicesTable />
       </div>
+
       <div className="bg-white p-4 shadow rounded">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

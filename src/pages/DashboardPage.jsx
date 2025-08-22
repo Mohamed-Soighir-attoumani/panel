@@ -2,16 +2,12 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  registerables
-} from "chart.js";
+import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
 import IncidentsChart from "../components/IncidentsChart";
 import DevicesTable from "../components/DevicesTable";
 import { API_URL } from "../config";
 
-// Enregistrement des composants et du plugin datalabels
 ChartJS.register(...registerables, ChartDataLabels);
 
 const DashboardPage = () => {
@@ -28,7 +24,6 @@ const DashboardPage = () => {
   const handleAuthError = (err) => {
     const status = err?.response?.status;
     if (status === 401 || status === 403) {
-      // session expirée ou accès interdit -> on renvoie au login
       localStorage.removeItem("token");
       localStorage.removeItem("token_orig");
       window.location.href = "/login";
@@ -85,7 +80,6 @@ const DashboardPage = () => {
       const res = await axios.get(`${API_URL}/api/devices/count`, {
         headers: authHeaders,
       });
-      // Le backend renvoie { count, active, activeDays }
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
       } else {
@@ -106,9 +100,7 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
-    // on relance aussi si le token change (par ex. impersonation)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, token]);
+  }, [period, token]); // ⬅️ PAS de commentaire eslint ici
 
   const groupIncidentsByMonth = () => {
     const monthMap = {};
@@ -144,18 +136,11 @@ const DashboardPage = () => {
         anchor: 'end',
         align: 'top',
         color: '#000',
-        font: {
-          weight: 'bold',
-          size: 14
-        },
+        font: { weight: 'bold', size: 14 },
         formatter: value => value
       }
     },
-    scales: {
-      y: {
-        beginAtZero: true
-      }
-    }
+    scales: { y: { beginAtZero: true } }
   };
 
   const barChartData = {
@@ -184,10 +169,7 @@ const DashboardPage = () => {
           anchor: 'end',
           align: 'top',
           color: '#000',
-          font: {
-            weight: 'bold',
-            size: 14
-          },
+          font: { weight: 'bold', size: 14 },
           formatter: value => value
         }
       }

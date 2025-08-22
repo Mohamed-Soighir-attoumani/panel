@@ -28,13 +28,13 @@ const DevicesTable = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [debug, setDebug] = useState(""); // 👈 affichage d’erreur détaillé
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("lastSeenAt");
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
 
   const authHeaders = useMemo(
     () => (token ? { Authorization: `Bearer ${token}` } : {}),
@@ -56,24 +56,27 @@ const DevicesTable = () => {
   const fetchDevices = useCallback(async () => {
     setLoading(true);
     setErr("");
+    setDebug("");
     try {
       const res = await axios.get(`${API_URL}/api/devices`, {
         headers: { ...authHeaders, "Cache-Control": "no-cache" },
         params: { page, pageSize: PAGE_SIZE },
         timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
+        // on laisse axios lancer une exception sur 4xx/5xx
       });
 
-      if (res.status >= 400) throw res;
-
-      // L’API renvoie { items, page, pageSize }
       const list = Array.isArray(res.data?.items) ? res.data.items : [];
       setItems(list);
     } catch (e) {
-      if (!handleAuthError(e)) {
-        console.error("Erreur fetch devices:", e);
-        setErr("Impossible de charger les appareils.");
-      }
+      if (handleAuthError(e)) return;
+      // 🔎 debug lisible
+      const status = e?.response?.status;
+      const data = e?.response?.data;
+      const msg = data?.message || e?.message || "Erreur inconnue";
+      const full = `[GET ${API_URL}/api/devices] status=${status || "?"} message="${msg}"`;
+      console.error(full, data);
+      setDebug(full);
+      setErr("Impossible de charger les appareils.");
     } finally {
       setLoading(false);
     }
@@ -81,7 +84,7 @@ const DevicesTable = () => {
 
   useEffect(() => {
     fetchDevices();
-    const id = setInterval(fetchDevices, 30000); // auto-refresh
+    const id = setInterval(fetchDevices, 30000);
     return () => clearInterval(id);
   }, [fetchDevices]);
 
@@ -111,7 +114,6 @@ const DevicesTable = () => {
       const aVal = a?.[sortKey];
       const bVal = b?.[sortKey];
 
-      // dates
       if (["firstSeenAt", "lastSeenAt"].includes(sortKey)) {
         const aT = aVal ? new Date(aVal).getTime() : 0;
         const bT = bVal ? new Date(bVal).getTime() : 0;
@@ -205,10 +207,14 @@ const DevicesTable = () => {
         </div>
       </div>
 
+      {/* 👇 Affiche le message d’erreur *et* le debug détaillé */}
       {loading ? (
         <p className="text-gray-500">Chargement…</p>
       ) : err ? (
-        <p className="text-red-600">{err}</p>
+        <div>
+          <p className="text-red-600">{err}</p>
+          {debug && <pre className="mt-2 p-2 bg-red-50 text-xs overflow-auto rounded border border-red-200">{debug}</pre>}
+        </div>
       ) : filtered.length === 0 ? (
         <p className="text-gray-500">Aucun appareil.</p>
       ) : (
@@ -244,7 +250,7 @@ const DevicesTable = () => {
             </table>
           </div>
 
-          {/* Pagination */}
+          {/* Pagination locale */}
           <div className="flex items-center justify-between mt-4">
             <p className="text-xs text-gray-500">
               {filtered.length} appareil(s) • Page {currentPage}/{totalPages}

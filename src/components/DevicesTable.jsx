@@ -5,12 +5,36 @@ import { API_URL } from "../config";
 
 const PAGE_SIZE = 10;
 
-function fmt(d) {
+function fmtExact(d) {
   if (!d) return "—";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return "—";
+
+  // jj/mm/aaaa HH:MM:SS
+  const str = new Intl.DateTimeFormat("fr-FR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(dt);
+
+  // Décalage local vs UTC
+  const offMin = -dt.getTimezoneOffset(); // minutes à ajouter à UTC pour obtenir locale
+  const sign = offMin >= 0 ? "+" : "-";
+  const hh = String(Math.floor(Math.abs(offMin) / 60)).padStart(2, "0");
+  const mm = String(Math.abs(offMin) % 60).padStart(2, "0");
+
+  return `${str} UTC${sign}${hh}:${mm}`;
+}
+
+function isoTitle(d) {
   try {
-    return new Date(d).toLocaleString();
+    return new Date(d).toISOString();
   } catch {
-    return "—";
+    return "";
   }
 }
 
@@ -28,18 +52,14 @@ const DevicesTable = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [debug, setDebug] = useState(""); // 👈 affichage d’erreur détaillé
+  const [debug, setDebug] = useState("");
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState("lastSeenAt");
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
-
-  const authHeaders = useMemo(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token]
-  );
+  const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
 
   const handleAuthError = (e) => {
     const s = e?.response?.status;
@@ -62,14 +82,11 @@ const DevicesTable = () => {
         headers: { ...authHeaders, "Cache-Control": "no-cache" },
         params: { page, pageSize: PAGE_SIZE },
         timeout: 20000,
-        // on laisse axios lancer une exception sur 4xx/5xx
       });
-
       const list = Array.isArray(res.data?.items) ? res.data.items : [];
       setItems(list);
     } catch (e) {
       if (handleAuthError(e)) return;
-      // 🔎 debug lisible
       const status = e?.response?.status;
       const data = e?.response?.data;
       const msg = data?.message || e?.message || "Erreur inconnue";
@@ -84,7 +101,7 @@ const DevicesTable = () => {
 
   useEffect(() => {
     fetchDevices();
-    const id = setInterval(fetchDevices, 30000);
+    const id = setInterval(fetchDevices, 30000); // auto-refresh
     return () => clearInterval(id);
   }, [fetchDevices]);
 
@@ -132,10 +149,7 @@ const DevicesTable = () => {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const slice = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  );
+  const slice = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const changeSort = (key) => {
     if (sortKey === key) {
@@ -168,8 +182,8 @@ const DevicesTable = () => {
         JSON.stringify(d.model || ""),
         JSON.stringify(d.osVersion || ""),
         JSON.stringify(d.appVersion || ""),
-        JSON.stringify(fmt(d.firstSeenAt)),
-        JSON.stringify(fmt(d.lastSeenAt)),
+        JSON.stringify(fmtExact(d.firstSeenAt)),
+        JSON.stringify(fmtExact(d.lastSeenAt)),
         JSON.stringify(d.communeId || ""),
         JSON.stringify(d.communeName || ""),
       ].join(",")
@@ -207,13 +221,16 @@ const DevicesTable = () => {
         </div>
       </div>
 
-      {/* 👇 Affiche le message d’erreur *et* le debug détaillé */}
       {loading ? (
         <p className="text-gray-500">Chargement…</p>
       ) : err ? (
         <div>
           <p className="text-red-600">{err}</p>
-          {debug && <pre className="mt-2 p-2 bg-red-50 text-xs overflow-auto rounded border border-red-200">{debug}</pre>}
+          {debug && (
+            <pre className="mt-2 p-2 bg-red-50 text-xs overflow-auto rounded border border-red-200">
+              {debug}
+            </pre>
+          )}
         </div>
       ) : filtered.length === 0 ? (
         <p className="text-gray-500">Aucun appareil.</p>
@@ -229,8 +246,8 @@ const DevicesTable = () => {
                   <Th label="Modèle" active={sortKey === "model"} dir={sortDir} onClick={() => changeSort("model")} className="py-2 pr-4" />
                   <Th label="OS" active={sortKey === "osVersion"} dir={sortDir} onClick={() => changeSort("osVersion")} className="py-2 pr-4" />
                   <Th label="Version app" active={sortKey === "appVersion"} dir={sortDir} onClick={() => changeSort("appVersion")} className="py-2 pr-4" />
-                  <Th label="1ère vue" active={sortKey === "firstSeenAt"} dir={sortDir} onClick={() => changeSort("firstSeenAt")} className="py-2 pr-4" />
-                  <Th label="Dernière vue" active={sortKey === "lastSeenAt"} dir={sortDir} onClick={() => changeSort("lastSeenAt")} className="py-2" />
+                  <Th label="1ère vue (exacte)" active={sortKey === "firstSeenAt"} dir={sortDir} onClick={() => changeSort("firstSeenAt")} className="py-2 pr-4" />
+                  <Th label="Dernière vue (exacte)" active={sortKey === "lastSeenAt"} dir={sortDir} onClick={() => changeSort("lastSeenAt")} className="py-2" />
                 </tr>
               </thead>
               <tbody>
@@ -242,15 +259,14 @@ const DevicesTable = () => {
                     <td className="py-2 pr-4">{d.model || "—"}</td>
                     <td className="py-2 pr-4">{d.osVersion || "—"}</td>
                     <td className="py-2 pr-4">{d.appVersion || "—"}</td>
-                    <td className="py-2 pr-4">{fmt(d.firstSeenAt)}</td>
-                    <td className="py-2">{fmt(d.lastSeenAt)}</td>
+                    <td className="py-2 pr-4" title={isoTitle(d.firstSeenAt)}>{fmtExact(d.firstSeenAt)}</td>
+                    <td className="py-2" title={isoTitle(d.lastSeenAt)}>{fmtExact(d.lastSeenAt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Pagination locale */}
           <div className="flex items-center justify-between mt-4">
             <p className="text-xs text-gray-500">
               {filtered.length} appareil(s) • Page {currentPage}/{totalPages}

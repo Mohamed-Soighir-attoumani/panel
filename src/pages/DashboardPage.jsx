@@ -10,16 +10,19 @@ import { API_URL } from "../config";
 
 ChartJS.register(...registerables, ChartDataLabels);
 
-function normalizeType(raw) {
-  if (!raw) return "Inconnu";
-  // On normalise pour éviter "incendie", "Incendie " etc. considérés différents
-  return String(raw).trim();
+// Normalise les libellés de type (déduplication insensible à la casse/espaces)
+function canonicalizeLabel(raw) {
+  if (!raw) return { key: "inconnu", label: "Inconnu" };
+  const s = String(raw).trim();
+  const key = s.toLowerCase();
+  const label = s.charAt(0).toUpperCase() + s.slice(1);
+  return { key, label };
 }
 
 const DashboardPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [period, setPeriod] = useState("7");
+  const [period, setPeriod] = useState("7"); // "7" | "30" | "all"
   const [activity, setActivity] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
   const [incidentTotal, setIncidentTotal] = useState(0);
@@ -41,25 +44,23 @@ const DashboardPage = () => {
 
   const fetchData = async () => {
     try {
-      const incidentRes = await axios.get(
-        `${API_URL}/api/incidents?period=${period}`,
-        { headers: authHeaders }
-      );
+      // si "all", on ne filtre pas; sinon on passe ?period=7|30
+      const qs = period === "all" ? "" : `?period=${period}`;
+
+      const [incidentRes, notifRes, totalRes] = await Promise.all([
+        axios.get(`${API_URL}/api/incidents${qs}`, { headers: authHeaders }),
+        axios.get(`${API_URL}/api/notifications`, { headers: authHeaders }),
+        axios.get(`${API_URL}/api/incidents/count${qs}`, {
+          headers: authHeaders,
+        }),
+      ]);
+
       const realIncidents = Array.isArray(incidentRes.data)
         ? incidentRes.data
         : [];
-
-      const notifRes = await axios.get(`${API_URL}/api/notifications`, {
-        headers: authHeaders,
-      });
       const realNotifications = Array.isArray(notifRes.data)
         ? notifRes.data
         : [];
-
-      const totalRes = await axios.get(
-        `${API_URL}/api/incidents/count?period=${period}`,
-        { headers: authHeaders }
-      );
       const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
@@ -67,13 +68,16 @@ const DashboardPage = () => {
       setIncidentTotal(total);
 
       setActivity([
-        ...realIncidents.slice(0, 3).map((inc) => ({
-          type: "incident",
-          text: `Incident "${(inc.type || inc.title || "Inconnu")}" signalé`,
-          time: inc.createdAt
-            ? new Date(inc.createdAt).toLocaleString()
-            : "Date inconnue",
-        })),
+        ...realIncidents.slice(0, 3).map((inc) => {
+          const t = inc.type || inc.title || "Inconnu";
+          return {
+            type: "incident",
+            text: `Incident "${t}" signalé`,
+            time: inc.createdAt
+              ? new Date(inc.createdAt).toLocaleString()
+              : "Date inconnue",
+          };
+        }),
         ...realNotifications.slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif.title || notif.message || "Sans titre"}`,
@@ -116,20 +120,21 @@ const DashboardPage = () => {
     return () => clearInterval(interval);
   }, [period, token]);
 
-  // --------- Série "incidents dans le temps" (inchangé)
+  // ==== Série temporelle
   const dynamicChartData = useMemo(() => {
     const monthMap = {};
     incidents.forEach((inc) => {
       if (inc.createdAt) {
-        const date = new Date(inc.createdAt);
-        const monthLabel = `${date.getFullYear()}-${(date.getMonth() + 1)
-          .toString()
-          .padStart(2, "0")}`;
-        monthMap[monthLabel] = (monthMap[monthLabel] || 0) + 1;
+        const d = new Date(inc.createdAt);
+        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}`;
+        monthMap[k] = (monthMap[k] || 0) + 1;
       }
     });
     const labels = Object.keys(monthMap).sort();
-    const data = labels.map((m) => monthMap[m]);
+    const data = labels.map((k) => monthMap[k]);
     return { labels, data };
   }, [incidents]);
 
@@ -142,19 +147,18 @@ const DashboardPage = () => {
     },
   };
 
-  // --------- Répartition des incidents (corrigé : dynamique & exact)
-  const { barLabels, barData } = useMemo(() => {
-    // On regroupe sur (inc.type || inc.title)
-    const counts = new Map();
+  // ==== Répartition par types (vraies catégories dynamiques)
+  const { typeLabels, typeCounts } = useMemo(() => {
+    const map = new Map(); // key -> { label, count }
     for (const inc of incidents) {
-      const t = normalizeType(inc.type || inc.title);
-      counts.set(t, (counts.get(t) || 0) + 1);
+      const raw = inc.type || inc.title || "Inconnu";
+      const { key, label } = canonicalizeLabel(raw);
+      const entry = map.get(key) || { label, count: 0 };
+      entry.count += 1;
+      map.set(key, entry);
     }
-    // Tri décroissant par nombre
-    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-    const labels = entries.map(([k]) => k);
-    const data = entries.map(([, v]) => v);
-    return { barLabels: labels, barData: data };
+    const arr = Array.from(map.values()).sort((a, b) => b.count - a.count);
+    return { typeLabels: arr.map((x) => x.label), typeCounts: arr.map((x) => x.count) };
   }, [incidents]);
 
   const barChartOptions = {
@@ -176,7 +180,6 @@ const DashboardPage = () => {
     },
   };
 
-  // Palette simple qui s’étire si beaucoup de types
   const palette = [
     "rgba(75, 192, 192, 0.5)",
     "rgba(255, 99, 132, 0.5)",
@@ -186,15 +189,15 @@ const DashboardPage = () => {
     "rgba(255, 159, 64, 0.5)",
     "rgba(201, 203, 207, 0.5)",
   ];
-  const bgColors = barLabels.map((_, i) => palette[i % palette.length]);
+  const bgColors = typeLabels.map((_, i) => palette[i % palette.length]);
   const borderColors = bgColors.map((c) => c.replace("0.5", "1"));
 
   const barChartData = {
-    labels: barLabels,
+    labels: typeLabels,
     datasets: [
       {
         label: "Répartition des incidents (tous types)",
-        data: barData,
+        data: typeCounts,
         backgroundColor: bgColors,
         borderColor: borderColors,
         borderWidth: 1,
@@ -243,6 +246,7 @@ const DashboardPage = () => {
           >
             <option value="7">7 derniers jours</option>
             <option value="30">30 derniers jours</option>
+            <option value="all">Tous</option>
           </select>
           <button
             onClick={fetchData}
@@ -314,11 +318,12 @@ const DashboardPage = () => {
           <h3 className="text-lg sm:text-xl font-semibold mb-4">
             📊 Répartition des Incidents
           </h3>
-          <Bar
-            data={barChartData}
-            options={barChartOptions}
-            plugins={[ChartDataLabels]}
-          />
+
+          {typeLabels.length === 0 ? (
+            <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+          ) : (
+            <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+          )}
         </div>
       </div>
 

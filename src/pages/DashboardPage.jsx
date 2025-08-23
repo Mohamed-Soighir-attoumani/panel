@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
@@ -10,6 +10,12 @@ import { API_URL } from "../config";
 
 ChartJS.register(...registerables, ChartDataLabels);
 
+function normalizeType(raw) {
+  if (!raw) return "Inconnu";
+  // On normalise pour éviter "incendie", "Incendie " etc. considérés différents
+  return String(raw).trim();
+}
+
 const DashboardPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -18,7 +24,8 @@ const DashboardPage = () => {
   const [deviceCount, setDeviceCount] = useState(0);
   const [incidentTotal, setIncidentTotal] = useState(0);
 
-  const token = typeof window !== "undefined" ? (localStorage.getItem("token") || "") : "";
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
   const handleAuthError = (err) => {
@@ -38,13 +45,16 @@ const DashboardPage = () => {
         `${API_URL}/api/incidents?period=${period}`,
         { headers: authHeaders }
       );
-      const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
+      const realIncidents = Array.isArray(incidentRes.data)
+        ? incidentRes.data
+        : [];
 
-      const notifRes = await axios.get(
-        `${API_URL}/api/notifications`,
-        { headers: authHeaders }
-      );
-      const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
+      const notifRes = await axios.get(`${API_URL}/api/notifications`, {
+        headers: authHeaders,
+      });
+      const realNotifications = Array.isArray(notifRes.data)
+        ? notifRes.data
+        : [];
 
       const totalRes = await axios.get(
         `${API_URL}/api/incidents/count?period=${period}`,
@@ -57,16 +67,20 @@ const DashboardPage = () => {
       setIncidentTotal(total);
 
       setActivity([
-        ...realIncidents.slice(0, 3).map(inc => ({
+        ...realIncidents.slice(0, 3).map((inc) => ({
           type: "incident",
-          text: `Incident "${inc.type || 'Inconnu'}" signalé`,
-          time: inc.createdAt ? new Date(inc.createdAt).toLocaleString() : "Date inconnue"
+          text: `Incident "${(inc.type || inc.title || "Inconnu")}" signalé`,
+          time: inc.createdAt
+            ? new Date(inc.createdAt).toLocaleString()
+            : "Date inconnue",
         })),
-        ...realNotifications.slice(0, 3).map(notif => ({
+        ...realNotifications.slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif.title || notif.message || "Sans titre"}`,
-          time: notif.createdAt ? new Date(notif.createdAt).toLocaleString() : "Date inconnue"
-        }))
+          time: notif.createdAt
+            ? new Date(notif.createdAt).toLocaleString()
+            : "Date inconnue",
+        })),
       ]);
     } catch (err) {
       if (!handleAuthError(err)) {
@@ -100,23 +114,24 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
-  }, [period, token]); // ⬅️ PAS de commentaire eslint ici
+  }, [period, token]);
 
-  const groupIncidentsByMonth = () => {
+  // --------- Série "incidents dans le temps" (inchangé)
+  const dynamicChartData = useMemo(() => {
     const monthMap = {};
-    incidents.forEach(inc => {
+    incidents.forEach((inc) => {
       if (inc.createdAt) {
         const date = new Date(inc.createdAt);
-        const monthLabel = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`;
+        const monthLabel = `${date.getFullYear()}-${(date.getMonth() + 1)
+          .toString()
+          .padStart(2, "0")}`;
         monthMap[monthLabel] = (monthMap[monthLabel] || 0) + 1;
       }
     });
-    const sortedMonths = Object.keys(monthMap).sort();
-    const counts = sortedMonths.map(month => monthMap[month]);
-    return { labels: sortedMonths, data: counts };
-  };
-
-  const dynamicChartData = groupIncidentsByMonth();
+    const labels = Object.keys(monthMap).sort();
+    const data = labels.map((m) => monthMap[m]);
+    return { labels, data };
+  }, [incidents]);
 
   const lineChartOptions = {
     animation: { duration: 1000, easing: "easeInOutQuart" },
@@ -127,52 +142,71 @@ const DashboardPage = () => {
     },
   };
 
+  // --------- Répartition des incidents (corrigé : dynamique & exact)
+  const { barLabels, barData } = useMemo(() => {
+    // On regroupe sur (inc.type || inc.title)
+    const counts = new Map();
+    for (const inc of incidents) {
+      const t = normalizeType(inc.type || inc.title);
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    // Tri décroissant par nombre
+    const entries = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    const labels = entries.map(([k]) => k);
+    const data = entries.map(([, v]) => v);
+    return { barLabels: labels, barData: data };
+  }, [incidents]);
+
   const barChartOptions = {
     responsive: true,
     plugins: {
       legend: { display: false },
       tooltip: { enabled: true },
       datalabels: {
-        anchor: 'end',
-        align: 'top',
-        color: '#000',
-        font: { weight: 'bold', size: 14 },
-        formatter: value => value
-      }
+        anchor: "end",
+        align: "top",
+        color: "#000",
+        font: { weight: "bold", size: 12 },
+        formatter: (value) => value,
+      },
     },
-    scales: { y: { beginAtZero: true } }
+    scales: {
+      x: { ticks: { autoSkip: false, maxRotation: 40, minRotation: 0 } },
+      y: { beginAtZero: true, precision: 0 },
+    },
   };
 
+  // Palette simple qui s’étire si beaucoup de types
+  const palette = [
+    "rgba(75, 192, 192, 0.5)",
+    "rgba(255, 99, 132, 0.5)",
+    "rgba(54, 162, 235, 0.5)",
+    "rgba(255, 206, 86, 0.5)",
+    "rgba(153, 102, 255, 0.5)",
+    "rgba(255, 159, 64, 0.5)",
+    "rgba(201, 203, 207, 0.5)",
+  ];
+  const bgColors = barLabels.map((_, i) => palette[i % palette.length]);
+  const borderColors = bgColors.map((c) => c.replace("0.5", "1"));
+
   const barChartData = {
-    labels: ["Incendie", "Accident", "Vol"],
+    labels: barLabels,
     datasets: [
       {
-        label: "Répartition des incidents",
-        data: [
-          incidents.filter(i => i.type === "Incendie").length,
-          incidents.filter(i => i.type === "Accident").length,
-          incidents.filter(i => i.type === "Vol").length,
-        ],
-        backgroundColor: [
-          "rgba(255, 99, 132, 0.5)",
-          "rgba(54, 162, 235, 0.5)",
-          "rgba(255, 206, 86, 0.5)",
-        ],
-        borderColor: [
-          "rgba(255, 99, 132, 1)",
-          "rgba(54, 162, 235, 1)",
-          "rgba(255, 206, 86, 1)",
-        ],
+        label: "Répartition des incidents (tous types)",
+        data: barData,
+        backgroundColor: bgColors,
+        borderColor: borderColors,
         borderWidth: 1,
         datalabels: {
           display: true,
-          anchor: 'end',
-          align: 'top',
-          color: '#000',
-          font: { weight: 'bold', size: 14 },
-          formatter: value => value
-        }
-      }
+          anchor: "end",
+          align: "top",
+          color: "#000",
+          font: { weight: "bold", size: 12 },
+          formatter: (value) => value,
+        },
+      },
     ],
   };
 
@@ -197,7 +231,9 @@ const DashboardPage = () => {
   return (
     <div className="p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">📊 Tableau de bord</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">
+          📊 Tableau de bord
+        </h1>
         <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
           <label className="font-medium">📅 Période :</label>
           <select
@@ -218,36 +254,71 @@ const DashboardPage = () => {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
-        <KpiCard icon="🚨" label="Incidents EN COURS" value={incidents.filter(i => i.status === "En cours").length} color="text-red-600" />
-        <KpiCard icon="✅" label="Incidents RÉSOLUS" value={incidents.filter(i => i.status === "Résolu").length} color="text-green-600" />
-        <KpiCard icon="📋" label="Incidents TOTAL" value={incidents.length} color="text-blue-600" />
-        <KpiCard icon="🔔" label="Notifications" value={notifications.length} color="text-purple-600" />
-        <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
+        <KpiCard
+          icon="🚨"
+          label="Incidents EN COURS"
+          value={incidents.filter((i) => i.status === "En cours").length}
+          color="text-red-600"
+        />
+        <KpiCard
+          icon="✅"
+          label="Incidents RÉSOLUS"
+          value={incidents.filter((i) => i.status === "Résolu").length}
+          color="text-green-600"
+        />
+        <KpiCard
+          icon="📋"
+          label="Incidents TOTAL"
+          value={incidents.length}
+          color="text-blue-600"
+        />
+        <KpiCard
+          icon="🔔"
+          label="Notifications"
+          value={notifications.length}
+          color="text-purple-600"
+        />
+        <KpiCard
+          icon="👥"
+          label="Utilisateurs"
+          value={deviceCount}
+          color="text-gray-800"
+        />
       </div>
 
       <IncidentsChart />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
         <div className="bg-white p-4 shadow rounded col-span-1 xl:col-span-2">
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">📈 Incidents au Fil du Temps</h3>
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">
+            📈 Incidents au Fil du Temps
+          </h3>
           <Line
             data={{
               labels: dynamicChartData.labels,
-              datasets: [{
-                label: "Nombre d'incidents",
-                data: dynamicChartData.data,
-                borderColor: "rgba(75, 192, 192, 1)",
-                backgroundColor: "rgba(75, 192, 192, 0.2)",
-                tension: 0.3,
-              }]
+              datasets: [
+                {
+                  label: "Nombre d'incidents",
+                  data: dynamicChartData.data,
+                  borderColor: "rgba(75, 192, 192, 1)",
+                  backgroundColor: "rgba(75, 192, 192, 0.2)",
+                  tension: 0.3,
+                },
+              ],
             }}
             options={lineChartOptions}
           />
         </div>
 
         <div className="bg-white p-4 shadow rounded">
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">📊 Répartition des Incidents</h3>
-          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">
+            📊 Répartition des Incidents
+          </h3>
+          <Bar
+            data={barChartData}
+            options={barChartOptions}
+            plugins={[ChartDataLabels]}
+          />
         </div>
       </div>
 
@@ -256,7 +327,9 @@ const DashboardPage = () => {
       </div>
 
       <div className="bg-white p-4 shadow rounded">
-        <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">
+          📜 Activité Récente
+        </h3>
         {activity.length === 0 ? (
           <p className="text-gray-500">Aucune activité récente.</p>
         ) : (

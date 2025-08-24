@@ -294,9 +294,6 @@ const DashboardPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
 
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">
-            📊 Répartition des Incidents
-          </h3>
 
           {typeLabels.length === 0 ? (
             <p className="text-gray-500">Aucun incident pour la période choisie.</p>

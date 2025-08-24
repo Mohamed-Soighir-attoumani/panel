@@ -293,26 +293,7 @@ const DashboardPage = () => {
       <IncidentsChart />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-4 shadow rounded col-span-1 xl:col-span-2">
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">
-            📈 Incidents au Fil du Temps
-          </h3>
-          <Line
-            data={{
-              labels: dynamicChartData.labels,
-              datasets: [
-                {
-                  label: "Nombre d'incidents",
-                  data: dynamicChartData.data,
-                  borderColor: "rgba(75, 192, 192, 1)",
-                  backgroundColor: "rgba(75, 192, 192, 0.2)",
-                  tension: 0.3,
-                },
-              ],
-            }}
-            options={lineChartOptions}
-          />
-        </div>
+
 
         <div className="bg-white p-4 shadow rounded">
           <h3 className="text-lg sm:text-xl font-semibold mb-4">

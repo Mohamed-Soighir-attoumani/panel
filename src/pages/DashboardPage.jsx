@@ -294,8 +294,6 @@ const DashboardPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
 
-
-        <div className="bg-white p-4 shadow rounded">
           <h3 className="text-lg sm:text-xl font-semibold mb-4">
             📊 Répartition des Incidents
           </h3>
@@ -306,7 +304,7 @@ const DashboardPage = () => {
             <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
           )}
         </div>
-      </div>
+  
 
       <div className="mt-6">
         <DevicesTable />

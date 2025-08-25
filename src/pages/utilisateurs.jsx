@@ -3,8 +3,8 @@ import axios from "axios";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
-  Check, X, RotateCcw, BadgeCheck, FileText, UserCog, RefreshCcw, ShieldBan, ShieldCheck,
-  Wallet, CreditCard, Search, Filter, PlusCircle, Loader2, Pencil, Save, XCircle
+  Check, X, RotateCcw, BadgeCheck, FileText, ShieldBan, ShieldCheck,
+  Wallet, CreditCard, Search, Filter, PlusCircle, Loader2, Save, XCircle, X as XIcon,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
@@ -30,7 +30,7 @@ const Pill = ({ ok, children, title }) => (
 );
 
 /* ----------------- Page ------------------ */
-export default function Utilisateurs() {
+export default function Administrateurs() {
   const token = useMemo(() => localStorage.getItem("token") || "", []);
   const mountedRef = useRef(true);
   const listAbort = useRef(null);
@@ -44,7 +44,6 @@ export default function Utilisateurs() {
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [communeId, setCommuneId] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // active|inactive
   const [subFilter, setSubFilter] = useState(""); // active|expired|none
   const [page, setPage] = useState(1);
@@ -53,10 +52,10 @@ export default function Utilisateurs() {
   const [plans, setPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
 
-  const [editUser, setEditUser] = useState(null);         // { ...user }
+  const [editUser, setEditUser] = useState(null);
   const [showEdit, setShowEdit] = useState(false);
 
-  const [subUser, setSubUser] = useState(null);           // { ...user }
+  const [subUser, setSubUser] = useState(null);
   const [showSub, setShowSub] = useState(false);
   const [subPayload, setSubPayload] = useState({ planId: "", periodMonths: 1, method: "card" });
   const [doingAction, setDoingAction] = useState(false);
@@ -67,7 +66,9 @@ export default function Utilisateurs() {
   const [showInvoices, setShowInvoices] = useState(false);
 
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState({ email: "", password: "", name: "", communeId: "", communeName: "", role: "client" });
+  const [createForm, setCreateForm] = useState({
+    email: "", password: "", name: "", communeId: "", communeName: "", role: "admin",
+  });
 
   // lifecycle
   useEffect(() => {
@@ -126,7 +127,7 @@ export default function Utilisateurs() {
     }
   }, [token]);
 
-  // fetch users
+  // fetch users (on force le filtre côté API si pris en charge, sinon on filtrera côté client)
   const fetchUsers = useCallback(async () => {
     if (!API_URL || !token) return;
 
@@ -140,7 +141,8 @@ export default function Utilisateurs() {
       const params = {
         q: debouncedQ || undefined,
         communeId: communeId || undefined,
-        role: roleFilter || undefined,
+        role: "admin",             // ⬅️ on force la récupération des admins
+        createdBy: me?._id || me?.id || undefined, // ⬅️ si l’API accepte ce filtre
         status: statusFilter || undefined,
         sub: subFilter || undefined,
         page,
@@ -162,10 +164,19 @@ export default function Utilisateurs() {
       if (r.status >= 400) throw new Error(r.data?.message || `Erreur API (${r.status})`);
 
       // tolérance backend: {items} ou {users}
-      const list = Array.isArray(r.data?.items) ? r.data.items
+      const raw = Array.isArray(r.data?.items) ? r.data.items
         : Array.isArray(r.data?.users) ? r.data.users
         : [];
-      safeSet(setUsers)(list);
+
+      // ⬇️ Filtre client-side au cas où le backend n’applique pas createdBy/role
+      const admins = raw.filter(u => {
+        const isAdmin = norm(u.role) === "admin";
+        const creator = u.createdBy?._id || u.createdBy || u.creatorId || null;
+        // si le champ createdBy existe on limite à ceux créés par le superadmin courant
+        return isAdmin && (creator ? (creator === (me?._id || me?.id)) : true);
+      });
+
+      safeSet(setUsers)(admins);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;
       toast.error(normalizeErr(e, "Erreur /api/users"));
@@ -173,7 +184,7 @@ export default function Utilisateurs() {
     } finally {
       setLoadingList(false);
     }
-  }, [token, debouncedQ, communeId, roleFilter, statusFilter, subFilter, page]);
+  }, [token, debouncedQ, communeId, statusFilter, subFilter, page, me]);
 
   useEffect(() => {
     if (!loadingMe && me) {
@@ -182,7 +193,7 @@ export default function Utilisateurs() {
     }
   }, [loadingMe, me, fetchUsers, loadPlans]);
 
-  // communes list (à partir des users)
+  // communes list (à partir des admins filtrés)
   const communes = useMemo(() => {
     const set = new Map();
     for (const u of users) {
@@ -194,8 +205,8 @@ export default function Utilisateurs() {
   }, [users]);
 
   // derived
-  const total = users.length; // quand backend ne renvoie pas total, on fait simple
-  const canManage = norm(me?.role) === "superadmin"; // page superadmin
+  const total = users.length;
+  const canManage = norm(me?.role) === "superadmin";
 
   /* ----------------- Actions ------------------ */
 
@@ -212,7 +223,7 @@ export default function Utilisateurs() {
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = "utilisateurs.csv"; a.click(); URL.revokeObjectURL(url);
+    a.href = url; a.download = "administrateurs.csv"; a.click(); URL.revokeObjectURL(url);
   };
 
   const openEdit = (u) => { setEditUser({ ...u }); setShowEdit(true); };
@@ -224,11 +235,13 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      const r = await axios.put(`${API_URL}/api/users/${editUser._id || editUser.id}`, editUser, {
+      // on force le rôle admin pour éviter une perte du filtre
+      const payload = { ...editUser, role: "admin" };
+      const r = await axios.put(`${API_URL}/api/users/${editUser._id || editUser.id}`, payload, {
         headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
       });
       if (r.status >= 400) throw new Error(r.data?.message || "Échec de la mise à jour");
-      toast.success("Utilisateur mis à jour ✅");
+      toast.success("Administrateur mis à jour ✅");
       setShowEdit(false);
       await sleep(150);
       fetchUsers();
@@ -251,20 +264,6 @@ export default function Utilisateurs() {
       fetchUsers();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur activation"));
-    }
-  };
-
-  const changeRole = async (u, role) => {
-    try {
-      const r = await axios.put(`${API_URL}/api/users/${u._id || u.id}`, { role }, {
-        headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
-      });
-      if (r.status >= 400) throw new Error(r.data?.message || "Échec changement de rôle");
-      toast.success(`Rôle changé en ${role} ✅`);
-      await sleep(120);
-      fetchUsers();
-    } catch (e) {
-      toast.error(normalizeErr(e, "Erreur rôle"));
     }
   };
 
@@ -334,12 +333,14 @@ export default function Utilisateurs() {
     if (!EMAIL_RE.test(createForm.email)) { toast.error("Email invalide"); return; }
     try {
       setCreating(true);
-      const r = await axios.post(`${API_URL}/api/users`, createForm, {
+      // on envoie role="admin" et, si supporté, createdBy (le backend peut l’ignorer)
+      const payload = { ...createForm, role: "admin", createdBy: me?._id || me?.id };
+      const r = await axios.post(`${API_URL}/api/users`, payload, {
         headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
       });
       if (r.status >= 400) throw new Error(r.data?.message || "Création refusée");
-      toast.success("Utilisateur créé ✅");
-      setCreateForm({ email: "", password: "", name: "", communeId: "", communeName: "", role: "client" });
+      toast.success("Administrateur créé ✅");
+      setCreateForm({ email: "", password: "", name: "", communeId: "", communeName: "", role: "admin" });
       await sleep(120);
       fetchUsers();
     } catch (e) {
@@ -380,7 +381,7 @@ export default function Utilisateurs() {
 
         {/* Header */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-bold text-gray-800">Gestion des utilisateurs</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Gestion des administrateurs</h1>
           <div className="flex flex-wrap gap-2">
             <button onClick={exportCSV} className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-2">
               <FileText size={16}/> Export CSV
@@ -417,16 +418,12 @@ export default function Utilisateurs() {
                 </select>
               </div>
 
+              {/* Rôle verrouillé à Admin */}
               <div>
                 <label className="text-xs text-gray-600">Rôle</label>
-                <select className="w-full border rounded px-3 py-2"
-                        value={roleFilter}
-                        onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}>
-                  <option value="">Tous</option>
-                  <option value="client">Client</option>
-                  <option value="vendeur">Vendeur</option>
-                  <option value="admin">Admin</option>
-                </select>
+                <input className="w-full border rounded px-3 py-2 bg-gray-50 text-gray-500"
+                       value="Admin (filtre imposé)"
+                       disabled />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -463,9 +460,9 @@ export default function Utilisateurs() {
           </div>
         </div>
 
-        {/* Création rapide */}
+        {/* Création rapide d’un administrateur */}
         <div className="bg-white shadow rounded-lg p-4">
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Créer un utilisateur</h2>
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">Créer un administrateur</h2>
           <form onSubmit={createUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             <input className="border rounded px-3 py-2" placeholder="Email *" type="email"
                    value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} required/>
@@ -477,12 +474,8 @@ export default function Utilisateurs() {
                    value={createForm.communeId} onChange={e => setCreateForm({ ...createForm, communeId: e.target.value })}/>
             <input className="border rounded px-3 py-2" placeholder="communeName"
                    value={createForm.communeName} onChange={e => setCreateForm({ ...createForm, communeName: e.target.value })}/>
-            <select className="border rounded px-3 py-2" value={createForm.role}
-                    onChange={e => setCreateForm({ ...createForm, role: e.target.value })}>
-              <option value="client">Client</option>
-              <option value="vendeur">Vendeur</option>
-              <option value="admin">Admin</option>
-            </select>
+            {/* rôle figé à admin */}
+            <input className="border rounded px-3 py-2 bg-gray-50 text-gray-500" value="admin" disabled/>
 
             <div className="lg:col-span-6">
               <button disabled={creating}
@@ -496,20 +489,20 @@ export default function Utilisateurs() {
         {/* Liste */}
         <div className="bg-white shadow rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold text-gray-800">Utilisateurs</h2>
-            <div className="text-sm text-gray-500">{total} utilisateur(s)</div>
+            <h2 className="text-lg font-semibold text-gray-800">Administrateurs</h2>
+            <div className="text-sm text-gray-500">{total} administrateur(s)</div>
           </div>
 
           {loadingList ? (
             <div className="text-gray-500 flex items-center gap-2"><Loader2 className="animate-spin" size={16}/> Chargement…</div>
           ) : users.length === 0 ? (
-            <div className="text-gray-500">Aucun utilisateur trouvé.</div>
+            <div className="text-gray-500">Aucun administrateur trouvé.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full border border-gray-200">
                 <thead className="bg-gray-50">
                 <tr>
-                  {["Email","Nom","Rôle","Commune","Statut","Abonnement","Actions"].map(h => (
+                  {["Email","Nom","Commune","Statut","Abonnement","Actions"].map(h => (
                     <th key={h} className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b">{h}</th>
                   ))}
                 </tr>
@@ -525,7 +518,6 @@ export default function Utilisateurs() {
                     <tr key={id} className="hover:bg-gray-50">
                       <td className="px-4 py-2 border-b text-sm">{u.email}</td>
                       <td className="px-4 py-2 border-b text-sm">{u.name || "—"}</td>
-                      <td className="px-4 py-2 border-b text-sm capitalize">{u.role || "—"}</td>
                       <td className="px-4 py-2 border-b text-sm">{commune}</td>
                       <td className="px-4 py-2 border-b text-sm">
                         <Pill ok={active}>{active ? "Actif" : "Inactif"}</Pill>
@@ -540,14 +532,9 @@ export default function Utilisateurs() {
                       </td>
                       <td className="px-4 py-2 border-b text-sm">
                         <div className="flex flex-wrap gap-2">
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
+                          <button className="px-2 py-1 border rounded hover:bg-gray-50"
                                   onClick={() => openEdit(u)} title="Éditer infos">
-                            <Pencil size={14}/> Éditer
-                          </button>
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                                  onClick={() => changeRole(u, u.role === "vendeur" ? "client" : "vendeur")}
-                                  title="Basculer client/vendeur">
-                            <UserCog size={14}/> {u.role === "vendeur" ? "Client" : "Vendeur"}
+                            Éditer
                           </button>
                           <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
                                   onClick={() => toggleActive(u)} title="Activer/Désactiver">
@@ -575,7 +562,7 @@ export default function Utilisateurs() {
 
       {/* MODAL EDIT */}
       {showEdit && editUser && (
-        <Modal onClose={() => setShowEdit(false)} title="Modifier l’utilisateur">
+        <Modal onClose={() => setShowEdit(false)} title="Modifier l’administrateur">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-600">Email</label>
@@ -597,14 +584,10 @@ export default function Utilisateurs() {
               <input className="w-full border rounded px-3 py-2" value={editUser.communeName || ""}
                      onChange={e => setEditUser({ ...editUser, communeName: e.target.value })}/>
             </div>
+            {/* rôle figé à admin */}
             <div>
               <label className="text-xs text-gray-600">Rôle</label>
-              <select className="w-full border rounded px-3 py-2" value={editUser.role || "client"}
-                      onChange={e => setEditUser({ ...editUser, role: e.target.value })}>
-                <option value="client">Client</option>
-                <option value="vendeur">Vendeur</option>
-                <option value="admin">Admin</option>
-              </select>
+              <input className="w-full border rounded px-3 py-2 bg-gray-50 text-gray-500" value="admin" disabled/>
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2">
@@ -659,7 +642,7 @@ export default function Utilisateurs() {
           <div className="mt-4 flex flex-wrap justify-end gap-2">
             <button className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
                     onClick={() => setShowSub(false)}>
-              <X size={16}/> Fermer
+              <XIcon size={16}/> Fermer
             </button>
             <button className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
                     onClick={() => startOrRenew("start")} disabled={doingAction}>
@@ -667,11 +650,11 @@ export default function Utilisateurs() {
             </button>
             <button className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
                     onClick={() => startOrRenew("renew")} disabled={doingAction}>
-              <RefreshCcw size={16}/> Renouveler
+              <RotateCcw size={16}/> Renouveler
             </button>
             <button className="px-3 py-2 border rounded hover:bg-red-600 text-red-600 hover:text-white flex items-center gap-1"
                     onClick={cancelSub} disabled={doingAction}>
-              <RotateCcw size={16}/> Annuler
+              Annuler
             </button>
           </div>
         </Modal>
@@ -722,7 +705,7 @@ function Modal({ title, children, onClose }) {
       <div className="relative bg-white rounded-lg shadow-xl w-[95vw] max-w-2xl p-4">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100"><X size={18}/></button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100"><XIcon size={18}/></button>
         </div>
         {children}
       </div>

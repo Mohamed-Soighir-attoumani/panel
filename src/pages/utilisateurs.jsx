@@ -5,6 +5,7 @@ import "react-toastify/dist/ReactToastify.css";
 import {
   Check, X, RotateCcw, BadgeCheck, FileText, ShieldBan, ShieldCheck,
   Wallet, CreditCard, Search, Filter, PlusCircle, Loader2, Save, XCircle, X as XIcon,
+  RefreshCcw, ArrowUpDown, ChevronLeft, ChevronRight
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
@@ -16,7 +17,7 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
 
-const PAGE_SIZE = 15;
+const DEFAULT_PAGE_SIZE = 15;
 
 /* Small pill */
 const Pill = ({ ok, children, title }) => (
@@ -28,6 +29,36 @@ const Pill = ({ ok, children, title }) => (
     {ok ? <Check size={12}/> : <X size={12}/>} {children}
   </span>
 );
+
+/* Dedup util (par _id puis par email) */
+function dedupUsers(arr) {
+  const byId = new Map();
+  for (const u of (arr || [])) {
+    const id = u._id || u.id || u.email || Math.random();
+    if (!byId.has(id)) byId.set(id, u);
+  }
+  // seconde passe par email si doublons différents d’ID
+  const byEmail = new Map();
+  for (const u of byId.values()) {
+    const key = (u.email || "").toLowerCase();
+    if (!key) { byEmail.set(Math.random(), u); continue; }
+    if (!byEmail.has(key)) byEmail.set(key, u);
+  }
+  return Array.from(byEmail.values());
+}
+
+/* Tri client léger en attendant tri serveur */
+function sortList(list, sortBy, sortDir) {
+  if (!sortBy) return list;
+  const dir = sortDir === "desc" ? -1 : 1;
+  return [...list].sort((a, b) => {
+    let av = (a?.[sortBy] ?? "").toString().toLowerCase();
+    let bv = (b?.[sortBy] ?? "").toString().toLowerCase();
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
 
 /* ----------------- Page ------------------ */
 export default function Administrateurs() {
@@ -46,7 +77,15 @@ export default function Administrateurs() {
   const [communeId, setCommuneId] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // active|inactive
   const [subFilter, setSubFilter] = useState(""); // active|expired|none
+  const [onlyMine, setOnlyMine] = useState(false); // créés par moi (superadmin)
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [hasNextPage, setHasNextPage] = useState(false); // fallback quand total inconnu
+  const [total, setTotal] = useState(null); // si l’API renvoie un total
+
+  // tri
+  const [sortBy, setSortBy] = useState(""); // "email" | "name" | "communeName"
+  const [sortDir, setSortDir] = useState("asc");
 
   // plans / modals
   const [plans, setPlans] = useState([]);
@@ -70,7 +109,6 @@ export default function Administrateurs() {
     email: "", password: "", name: "", communeId: "", communeName: "", role: "admin",
   });
 
-  // lifecycle
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -116,7 +154,7 @@ export default function Administrateurs() {
       if (r.status >= 400) throw new Error(r.data?.message || "Plans indisponibles");
       safeSet(setPlans)(Array.isArray(r.data?.plans) ? r.data.plans : []);
     } catch {
-      // fallback plans si l'API n'existe pas encore
+      // fallback plans
       safeSet(setPlans)([
         { id: "basic",   name: "Basic",   price: 9.9,  currency: "EUR", period: "mois" },
         { id: "pro",     name: "Pro",     price: 19.9, currency: "EUR", period: "mois" },
@@ -138,19 +176,24 @@ export default function Administrateurs() {
 
     setLoadingList(true);
     try {
-      // 1) tentative via /api/admins (route dédiée aux admins)
       const params = {
         q: debouncedQ || undefined,
         communeId: communeId || undefined,
         status: statusFilter || undefined,
         sub: subFilter || undefined,
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
+        role: "admin",
+        createdBy: onlyMine ? (me?._id || me?.id) : undefined, // si backend supporte
+        sortBy: ["email","name","communeName"].includes(sortBy) ? sortBy : undefined,
+        sortDir: sortDir,
       };
 
       let list = [];
+      let totalFromApi = null;
 
-      const r1 = await axios.get(`${API_URL}/api/admins`, {
+      // Route dédiée si tu l’as, sinon fallback users
+      const r = await axios.get(`${API_URL}/api/admins`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
         timeout: 20000,
@@ -158,17 +201,17 @@ export default function Administrateurs() {
         validateStatus: (s) => s >= 200 && s < 500,
       });
 
-      if (r1.status >= 200 && r1.status < 300) {
-        // tolérance de format
-        list = Array.isArray(r1.data?.items) ? r1.data.items
-             : Array.isArray(r1.data?.admins) ? r1.data.admins
-             : Array.isArray(r1.data) ? r1.data
+      if (r.status >= 200 && r.status < 300) {
+        list = Array.isArray(r.data?.items) ? r.data.items
+             : Array.isArray(r.data?.admins) ? r.data.admins
+             : Array.isArray(r.data) ? r.data
              : [];
+        totalFromApi = typeof r.data?.total === "number" ? r.data.total : null;
       } else {
-        // 2) fallback si /api/admins indispo -> /api/users?role=admin
+        // fallback
         const r2 = await axios.get(`${API_URL}/api/users`, {
           headers: { Authorization: `Bearer ${token}` },
-          params: { ...params, role: "admin" },
+          params,
           timeout: 20000,
           signal: controller.signal,
           validateStatus: (s) => s >= 200 && s < 500,
@@ -177,26 +220,38 @@ export default function Administrateurs() {
         list = Array.isArray(r2.data?.items) ? r2.data.items
              : Array.isArray(r2.data?.users) ? r2.data.users
              : [];
+        totalFromApi = typeof r2.data?.total === "number" ? r2.data.total : null;
       }
 
-      // garde-fou client : ne garder que role=admin
-      list = list.filter((u) => norm(u.role) === "admin");
+      // garde-fou client
+      list = (list || []).filter((u) => norm(u.role) === "admin");
+      // anti-doublons
+      list = dedupUsers(list);
+      // tri client si API ne trie pas
+      list = sortList(list, sortBy, sortDir);
 
       safeSet(setUsers)(list);
+      safeSet(setTotal)(totalFromApi);
+
+      // si pas de total, on devine s’il y a une page suivante
+      safeSet(setHasNextPage)(totalFromApi == null ? list.length >= pageSize : (page * pageSize) < totalFromApi);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;
       toast.error(normalizeErr(e, "Erreur chargement administrateurs"));
       safeSet(setUsers)([]);
+      safeSet(setTotal)(null);
+      safeSet(setHasNextPage)(false);
     } finally {
       setLoadingList(false);
     }
-  }, [token, debouncedQ, communeId, statusFilter, subFilter, page]);
+  }, [token, debouncedQ, communeId, statusFilter, subFilter, page, pageSize, sortBy, sortDir, onlyMine, me?._id]);
 
   useEffect(() => {
     if (!loadingMe && me) {
       fetchAdmins();
       loadPlans();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingMe, me, fetchAdmins, loadPlans]);
 
   // communes list (à partir des admins filtrés)
@@ -210,19 +265,18 @@ export default function Administrateurs() {
     return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
   }, [users]);
 
-  // derived
-  const total = users.length;
   const canManage = norm(me?.role) === "superadmin";
 
   /* ----------------- Actions ------------------ */
 
   const exportCSV = () => {
     const rows = [
-      ["email","name","role","communeId","communeName","isActive","subStatus","subEndAt"],
+      ["email","name","communeId","communeName","isActive","subStatus","subEndAt"],
       ...users.map(u => [
-        u.email || "", u.name || "", u.role || "", u.communeId || "", u.communeName || "",
+        u.email || "", u.name || "", u.communeId || "", u.communeName || "",
         (u.isActive === false ? "inactive" : "active"),
-        u.subscriptionStatus || "", u.subscriptionEndAt || ""
+        u.subscriptionStatus || (u.subscriptionEndAt ? "active" : "none"),
+        u.subscriptionEndAt || ""
       ])
     ];
     const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
@@ -232,7 +286,21 @@ export default function Administrateurs() {
     a.href = url; a.download = "administrateurs.csv"; a.click(); URL.revokeObjectURL(url);
   };
 
-  const openEdit = (u) => { setEditUser({ ...u }); setShowEdit(true); };
+  const resetFilters = () => {
+    setQ("");
+    setDebouncedQ("");
+    setCommuneId("");
+    setStatusFilter("");
+    setSubFilter("");
+    setOnlyMine(false);
+    setSortBy("");
+    setSortDir("asc");
+    setPage(1);
+    setPageSize(DEFAULT_PAGE_SIZE);
+    fetchAdmins();
+  };
+
+  const openEdit = (u) => { setEditUser({ ...u, role: "admin" }); setShowEdit(true); };
   const saveEdit = async () => {
     if (!editUser) return;
     if (editUser.email && !EMAIL_RE.test(editUser.email)) {
@@ -241,7 +309,6 @@ export default function Administrateurs() {
     }
     try {
       setDoingAction(true);
-      // on force le rôle admin pour éviter une perte du filtre
       const payload = { ...editUser, role: "admin" };
       const r = await axios.put(`${API_URL}/api/users/${editUser._id || editUser.id}`, payload, {
         headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
@@ -339,7 +406,6 @@ export default function Administrateurs() {
     if (!EMAIL_RE.test(createForm.email)) { toast.error("Email invalide"); return; }
     try {
       setCreating(true);
-      // force role=admin ; si le backend stocke createdBy il pourra utiliser me._id
       const payload = { ...createForm, role: "admin", createdBy: me?._id || me?.id };
       const r = await axios.post(`${API_URL}/api/users`, payload, {
         headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
@@ -348,11 +414,21 @@ export default function Administrateurs() {
       toast.success("Administrateur créé ✅");
       setCreateForm({ email: "", password: "", name: "", communeId: "", communeName: "", role: "admin" });
       await sleep(120);
+      // si “créés par moi” activé, l’admin créé apparaîtra
       fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur création"));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const toggleSort = (key) => {
+    if (sortBy !== key) {
+      setSortBy(key);
+      setSortDir("asc");
+    } else {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     }
   };
 
@@ -380,6 +456,8 @@ export default function Administrateurs() {
     );
   }
 
+  const totalLabel = total ?? users.length;
+
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <ToastContainer />
@@ -389,6 +467,9 @@ export default function Administrateurs() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h1 className="text-2xl font-bold text-gray-800">Administrateurs (créés dans la page superadmin)</h1>
           <div className="flex flex-wrap gap-2">
+            <button onClick={() => fetchAdmins()} className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-2">
+              <RefreshCcw size={16}/> Actualiser
+            </button>
             <button onClick={exportCSV} className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-2">
               <FileText size={16}/> Export CSV
             </button>
@@ -398,7 +479,7 @@ export default function Administrateurs() {
         {/* Filtres */}
         <div className="bg-white shadow rounded-lg p-4">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div>
                 <label className="text-xs text-gray-600">Recherche</label>
                 <div className="relative">
@@ -424,45 +505,59 @@ export default function Administrateurs() {
                 </select>
               </div>
 
-              {/* Rôle verrouillé à Admin */}
+              {/* Rôle verrouillé */}
               <div>
                 <label className="text-xs text-gray-600">Rôle</label>
                 <input className="w-full border rounded px-3 py-2 bg-gray-50 text-gray-500"
-                       value="Admin (filtre imposé)"
-                       disabled />
+                       value="Admin (filtre imposé)" disabled />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-600">Statut</label>
-                  <select className="w-full border rounded px-3 py-2"
-                          value={statusFilter}
-                          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-                    <option value="">—</option>
-                    <option value="active">Actif</option>
-                    <option value="inactive">Inactif</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-600">Abonnement</label>
-                  <select className="w-full border rounded px-3 py-2"
-                          value={subFilter}
-                          onChange={(e) => { setSubFilter(e.target.value); setPage(1); }}>
-                    <option value="">—</option>
-                    <option value="active">Actif</option>
-                    <option value="expired">Expiré</option>
-                    <option value="none">Aucun</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs text-gray-600">Statut</label>
+                <select className="w-full border rounded px-3 py-2"
+                        value={statusFilter}
+                        onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+                  <option value="">—</option>
+                  <option value="active">Actif</option>
+                  <option value="inactive">Inactif</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-600">Abonnement</label>
+                <select className="w-full border rounded px-3 py-2"
+                        value={subFilter}
+                        onChange={(e) => { setSubFilter(e.target.value); setPage(1); }}>
+                  <option value="">—</option>
+                  <option value="active">Actif</option>
+                  <option value="expired">Expiré</option>
+                  <option value="none">Aucun</option>
+                </select>
               </div>
             </div>
 
-            <button
-              onClick={() => { setPage(1); fetchAdmins(); }}
-              className="px-4 py-2 bg-gray-900 text-white rounded flex items-center gap-2"
-            >
-              <Filter size={16}/> Filtrer
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch">
+              <label className="inline-flex items-center gap-2 text-sm text-gray-700 border rounded px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={onlyMine}
+                  onChange={(e) => { setOnlyMine(e.target.checked); setPage(1); }}
+                />
+                Créés par moi
+              </label>
+              <button
+                onClick={() => { setPage(1); fetchAdmins(); }}
+                className="px-4 py-2 bg-gray-900 text-white rounded flex items-center gap-2"
+              >
+                <Filter size={16}/> Filtrer
+              </button>
+              <button
+                onClick={resetFilters}
+                className="px-4 py-2 border rounded flex items-center gap-2"
+              >
+                <XIcon size={16}/> Réinitialiser
+              </button>
+            </div>
           </div>
         </div>
 
@@ -480,7 +575,6 @@ export default function Administrateurs() {
                    value={createForm.communeId} onChange={e => setCreateForm({ ...createForm, communeId: e.target.value })}/>
             <input className="border rounded px-3 py-2" placeholder="communeName"
                    value={createForm.communeName} onChange={e => setCreateForm({ ...createForm, communeName: e.target.value })}/>
-            {/* rôle figé à admin */}
             <input className="border rounded px-3 py-2 bg-gray-50 text-gray-500" value="admin" disabled/>
 
             <div className="lg:col-span-6">
@@ -496,72 +590,134 @@ export default function Administrateurs() {
         <div className="bg-white shadow rounded-lg p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-semibold text-gray-800">Administrateurs</h2>
-            <div className="text-sm text-gray-500">{total} administrateur(s)</div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-gray-500">{totalLabel} admin(s)</div>
+              <label className="text-xs text-gray-600 flex items-center gap-2">
+                Taille page
+                <select
+                  className="border rounded px-2 py-1"
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(parseInt(e.target.value, 10) || DEFAULT_PAGE_SIZE); setPage(1); }}
+                >
+                  {[10,15,25,50].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            </div>
           </div>
 
           {loadingList ? (
             <div className="text-gray-500 flex items-center gap-2"><Loader2 className="animate-spin" size={16}/> Chargement…</div>
           ) : users.length === 0 ? (
-            <div className="text-gray-500">Aucun administrateur trouvé.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full border border-gray-200">
-                <thead className="bg-gray-50">
-                <tr>
-                  {["Email","Nom","Commune","Statut","Abonnement","Actions"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b">{h}</th>
-                  ))}
-                </tr>
-                </thead>
-                <tbody>
-                {users.map(u => {
-                  const id = u._id || u.id;
-                  const commune = u.communeName || u.communeId || "—";
-                  const active = !(u.isActive === false);
-                  const subStatus = u.subscriptionStatus || (u.subscriptionEndAt ? "active" : "none");
-                  const subEnd = u.subscriptionEndAt ? new Date(u.subscriptionEndAt).toLocaleDateString() : null;
-                  return (
-                    <tr key={id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2 border-b text-sm">{u.email}</td>
-                      <td className="px-4 py-2 border-b text-sm">{u.name || "—"}</td>
-                      <td className="px-4 py-2 border-b text-sm">{commune}</td>
-                      <td className="px-4 py-2 border-b text-sm">
-                        <Pill ok={active}>{active ? "Actif" : "Inactif"}</Pill>
-                      </td>
-                      <td className="px-4 py-2 border-b text-sm">
-                        <div className="flex items-center gap-2">
-                          <Pill ok={subStatus === "active"} title={subEnd ? `Jusqu'au ${subEnd}` : ""}>
-                            {subStatus === "active" ? "Actif" : subStatus === "expired" ? "Expiré" : "Aucun"}
-                          </Pill>
-                          {subEnd && <span className="text-xs text-gray-500">({subEnd})</span>}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 border-b text-sm">
-                        <div className="flex flex-wrap gap-2">
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50"
-                                  onClick={() => openEdit(u)} title="Éditer infos">
-                            Éditer
-                          </button>
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                                  onClick={() => toggleActive(u)} title="Activer/Désactiver">
-                            {active ? <ShieldBan size={14}/> : <ShieldCheck size={14}/>} {active ? "Désactiver" : "Activer"}
-                          </button>
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                                  onClick={() => openSub(u)} title="Gérer l'abonnement">
-                            <Wallet size={14}/> Abonnement
-                          </button>
-                          <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                                  onClick={() => openInvoices(u)} title="Factures">
-                            <CreditCard size={14}/> Factures
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-                </tbody>
-              </table>
+            <div className="text-gray-500">
+              Aucun administrateur trouvé.
+              <button onClick={() => fetchAdmins()} className="ml-2 underline">Réessayer</button>
             </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border border-gray-200">
+                  <thead className="bg-gray-50">
+                  <tr>
+                    {[
+                      {key:"email", label:"Email"},
+                      {key:"name", label:"Nom"},
+                      {key:"communeName", label:"Commune"},
+                      {key:"__statut", label:"Statut"},
+                      {key:"__abo", label:"Abonnement"},
+                      {key:"__actions", label:"Actions"},
+                    ].map(col => (
+                      <th key={col.key} className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b">
+                        <div className="inline-flex items-center gap-1">
+                          {["email","name","communeName"].includes(col.key) ? (
+                            <button
+                              className="inline-flex items-center gap-1 hover:underline"
+                              onClick={() => toggleSort(col.key)}
+                              title="Trier"
+                            >
+                              {col.label}
+                              <ArrowUpDown size={14} className={`${sortBy===col.key ? "text-gray-900" : "text-gray-400"}`}/>
+                            </button>
+                          ) : (
+                            col.label
+                          )}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                  </thead>
+                  <tbody>
+                  {users.map(u => {
+                    const id = u._id || u.id;
+                    const commune = u.communeName || u.communeId || "—";
+                    const active = !(u.isActive === false);
+                    const subStatus = u.subscriptionStatus || (u.subscriptionEndAt ? "active" : "none");
+                    const subEnd = u.subscriptionEndAt ? new Date(u.subscriptionEndAt).toLocaleDateString() : null;
+                    return (
+                      <tr key={id} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 border-b text-sm">{u.email}</td>
+                        <td className="px-4 py-2 border-b text-sm">{u.name || "—"}</td>
+                        <td className="px-4 py-2 border-b text-sm">{commune}</td>
+                        <td className="px-4 py-2 border-b text-sm">
+                          <Pill ok={active}>{active ? "Actif" : "Inactif"}</Pill>
+                        </td>
+                        <td className="px-4 py-2 border-b text-sm">
+                          <div className="flex items-center gap-2">
+                            <Pill ok={subStatus === "active"} title={subEnd ? `Jusqu'au ${subEnd}` : ""}>
+                              {subStatus === "active" ? "Actif" : subStatus === "expired" ? "Expiré" : "Aucun"}
+                            </Pill>
+                            {subEnd && <span className="text-xs text-gray-500">({subEnd})</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 border-b text-sm">
+                          <div className="flex flex-wrap gap-2">
+                            <button className="px-2 py-1 border rounded hover:bg-gray-50"
+                                    onClick={() => openEdit(u)} title="Éditer infos">
+                              Éditer
+                            </button>
+                            <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
+                                    onClick={() => toggleActive(u)} title="Activer/Désactiver">
+                              {active ? <ShieldBan size={14}/> : <ShieldCheck size={14}/>} {active ? "Désactiver" : "Activer"}
+                            </button>
+                            <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
+                                    onClick={() => openSub(u)} title="Gérer l'abonnement">
+                              <Wallet size={14}/> {subStatus === "active" ? "Renouveler / Annuler" : "Démarrer"}
+                            </button>
+                            <button className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
+                                    onClick={() => openInvoices(u)} title="Factures">
+                              <CreditCard size={14}/> Factures
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="mt-3 flex items-center justify-between">
+                <div className="text-xs text-gray-500">
+                  Page {page}{total ? ` / ${Math.max(1, Math.ceil(total / pageSize))}` : ""}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="px-3 py-1 border rounded disabled:opacity-50 flex items-center gap-1"
+                    onClick={() => { setPage(p => Math.max(1, p - 1)); }}
+                    disabled={page <= 1}
+                  >
+                    <ChevronLeft size={16}/> Précédent
+                  </button>
+                  <button
+                    className="px-3 py-1 border rounded disabled:opacity-50 flex items-center gap-1"
+                    onClick={() => { setPage(p => p + 1); }}
+                    disabled={total != null ? (page * pageSize) >= total : !hasNextPage}
+                  >
+                    Suivant <ChevronRight size={16}/>
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -590,7 +746,6 @@ export default function Administrateurs() {
               <input className="w-full border rounded px-3 py-2" value={editUser.communeName || ""}
                      onChange={e => setEditUser({ ...editUser, communeName: e.target.value })}/>
             </div>
-            {/* rôle figé à admin */}
             <div>
               <label className="text-xs text-gray-600">Rôle</label>
               <input className="w-full border rounded px-3 py-2 bg-gray-50 text-gray-500" value="admin" disabled/>
@@ -651,17 +806,16 @@ export default function Administrateurs() {
               <XIcon size={16}/> Fermer
             </button>
             <button className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
-                    onClick={() => startOrRenew("start")} disabled={doingAction}>
-              <BadgeCheck size={16}/> {doingAction ? "Traitement…" : "Démarrer"}
+                    onClick={() => startOrRenew(subUser.subscriptionStatus === "active" ? "renew" : "start")}
+                    disabled={doingAction}>
+              <BadgeCheck size={16}/> {doingAction ? "Traitement…" : (subUser.subscriptionStatus === "active" ? "Renouveler" : "Démarrer")}
             </button>
-            <button className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
-                    onClick={() => startOrRenew("renew")} disabled={doingAction}>
-              <RotateCcw size={16}/> Renouveler
-            </button>
-            <button className="px-3 py-2 border rounded hover:bg-red-600 text-red-600 hover:text-white flex items-center gap-1"
-                    onClick={cancelSub} disabled={doingAction}>
-              Annuler
-            </button>
+            {subUser.subscriptionStatus === "active" && (
+              <button className="px-3 py-2 border rounded hover:bg-red-600 text-red-600 hover:text-white flex items-center gap-1"
+                      onClick={cancelSub} disabled={doingAction}>
+                <RotateCcw size={16}/> Annuler
+              </button>
+            )}
           </div>
         </Modal>
       )}

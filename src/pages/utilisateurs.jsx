@@ -127,8 +127,8 @@ export default function Administrateurs() {
     }
   }, [token]);
 
-  // fetch users (on force le filtre côté API si pris en charge, sinon on filtrera côté client)
-  const fetchUsers = useCallback(async () => {
+  // --------- FETCH LISTE DES ADMINS ----------
+  const fetchAdmins = useCallback(async () => {
     if (!API_URL || !token) return;
 
     // cancel previous
@@ -138,60 +138,66 @@ export default function Administrateurs() {
 
     setLoadingList(true);
     try {
+      // 1) tentative via /api/admins (route dédiée aux admins)
       const params = {
         q: debouncedQ || undefined,
         communeId: communeId || undefined,
-        role: "admin",             // ⬅️ on force la récupération des admins
-        createdBy: me?._id || me?.id || undefined, // ⬅️ si l’API accepte ce filtre
         status: statusFilter || undefined,
         sub: subFilter || undefined,
         page,
         pageSize: PAGE_SIZE,
       };
-      const r = await axios.get(`${API_URL}/api/users`, {
+
+      let list = [];
+
+      const r1 = await axios.get(`${API_URL}/api/admins`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
         timeout: 20000,
         signal: controller.signal,
         validateStatus: (s) => s >= 200 && s < 500,
       });
-      if (r.status === 401) {
-        toast.error("Session expirée. Veuillez vous reconnecter.");
-        localStorage.removeItem("token");
-        setTimeout(() => (window.location.href = "/login"), 600);
-        return;
+
+      if (r1.status >= 200 && r1.status < 300) {
+        // tolérance de format
+        list = Array.isArray(r1.data?.items) ? r1.data.items
+             : Array.isArray(r1.data?.admins) ? r1.data.admins
+             : Array.isArray(r1.data) ? r1.data
+             : [];
+      } else {
+        // 2) fallback si /api/admins indispo -> /api/users?role=admin
+        const r2 = await axios.get(`${API_URL}/api/users`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { ...params, role: "admin" },
+          timeout: 20000,
+          signal: controller.signal,
+          validateStatus: (s) => s >= 200 && s < 500,
+        });
+        if (r2.status >= 400) throw new Error(r2.data?.message || `Erreur API (${r2.status})`);
+        list = Array.isArray(r2.data?.items) ? r2.data.items
+             : Array.isArray(r2.data?.users) ? r2.data.users
+             : [];
       }
-      if (r.status >= 400) throw new Error(r.data?.message || `Erreur API (${r.status})`);
 
-      // tolérance backend: {items} ou {users}
-      const raw = Array.isArray(r.data?.items) ? r.data.items
-        : Array.isArray(r.data?.users) ? r.data.users
-        : [];
+      // garde-fou client : ne garder que role=admin
+      list = list.filter((u) => norm(u.role) === "admin");
 
-      // ⬇️ Filtre client-side au cas où le backend n’applique pas createdBy/role
-      const admins = raw.filter(u => {
-        const isAdmin = norm(u.role) === "admin";
-        const creator = u.createdBy?._id || u.createdBy || u.creatorId || null;
-        // si le champ createdBy existe on limite à ceux créés par le superadmin courant
-        return isAdmin && (creator ? (creator === (me?._id || me?.id)) : true);
-      });
-
-      safeSet(setUsers)(admins);
+      safeSet(setUsers)(list);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;
-      toast.error(normalizeErr(e, "Erreur /api/users"));
+      toast.error(normalizeErr(e, "Erreur chargement administrateurs"));
       safeSet(setUsers)([]);
     } finally {
       setLoadingList(false);
     }
-  }, [token, debouncedQ, communeId, statusFilter, subFilter, page, me]);
+  }, [token, debouncedQ, communeId, statusFilter, subFilter, page]);
 
   useEffect(() => {
     if (!loadingMe && me) {
-      fetchUsers();
+      fetchAdmins();
       loadPlans();
     }
-  }, [loadingMe, me, fetchUsers, loadPlans]);
+  }, [loadingMe, me, fetchAdmins, loadPlans]);
 
   // communes list (à partir des admins filtrés)
   const communes = useMemo(() => {
@@ -244,7 +250,7 @@ export default function Administrateurs() {
       toast.success("Administrateur mis à jour ✅");
       setShowEdit(false);
       await sleep(150);
-      fetchUsers();
+      fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur mise à jour"));
     } finally {
@@ -261,7 +267,7 @@ export default function Administrateurs() {
       if (r.status >= 400) throw new Error(r.data?.message || "Échec activation");
       toast.success(next ? "Compte activé" : "Compte désactivé");
       await sleep(120);
-      fetchUsers();
+      fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur activation"));
     }
@@ -281,7 +287,7 @@ export default function Administrateurs() {
       toast.success(mode === "renew" ? "Abonnement renouvelé ✅" : "Abonnement démarré ✅");
       setShowSub(false);
       await sleep(150);
-      fetchUsers();
+      fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, `Erreur ${mode}`));
     } finally {
@@ -300,7 +306,7 @@ export default function Administrateurs() {
       toast.success("Abonnement annulé ✅");
       setShowSub(false);
       await sleep(150);
-      fetchUsers();
+      fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur annulation"));
     } finally {
@@ -333,7 +339,7 @@ export default function Administrateurs() {
     if (!EMAIL_RE.test(createForm.email)) { toast.error("Email invalide"); return; }
     try {
       setCreating(true);
-      // on envoie role="admin" et, si supporté, createdBy (le backend peut l’ignorer)
+      // force role=admin ; si le backend stocke createdBy il pourra utiliser me._id
       const payload = { ...createForm, role: "admin", createdBy: me?._id || me?.id };
       const r = await axios.post(`${API_URL}/api/users`, payload, {
         headers: { Authorization: `Bearer ${token}` }, timeout: 20000, validateStatus: s => s >= 200 && s < 500
@@ -342,7 +348,7 @@ export default function Administrateurs() {
       toast.success("Administrateur créé ✅");
       setCreateForm({ email: "", password: "", name: "", communeId: "", communeName: "", role: "admin" });
       await sleep(120);
-      fetchUsers();
+      fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur création"));
     } finally {
@@ -381,7 +387,7 @@ export default function Administrateurs() {
 
         {/* Header */}
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-bold text-gray-800">Gestion des administrateurs</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Administrateurs (créés dans la page superadmin)</h1>
           <div className="flex flex-wrap gap-2">
             <button onClick={exportCSV} className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-2">
               <FileText size={16}/> Export CSV
@@ -452,7 +458,7 @@ export default function Administrateurs() {
             </div>
 
             <button
-              onClick={() => { setPage(1); fetchUsers(); }}
+              onClick={() => { setPage(1); fetchAdmins(); }}
               className="px-4 py-2 bg-gray-900 text-white rounded flex items-center gap-2"
             >
               <Filter size={16}/> Filtrer

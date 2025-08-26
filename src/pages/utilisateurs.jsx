@@ -19,6 +19,7 @@ import {
   Loader2,
   Save,
   XCircle,
+  RefreshCw,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
@@ -29,6 +30,7 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
   e?.response?.data?.message || e?.message || fallback;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
+const safeId = (u) => String(u?._id || u?.id || u?.userId || u?.email || "");
 
 const PAGE_SIZE = 15;
 
@@ -65,6 +67,11 @@ export default function Utilisateurs() {
   const [statusFilter, setStatusFilter] = useState(""); // active|inactive
   const [subFilter, setSubFilter] = useState(""); // active|expired|none
   const [page, setPage] = useState(1);
+  const [serverHasMore, setServerHasMore] = useState(false);
+
+  // per-row busy state
+  const [rowBusyId, setRowBusyId] = useState(null);
+  const [rowBusyAction, setRowBusyAction] = useState("");
 
   // plans / modals
   const [plans, setPlans] = useState([]);
@@ -170,8 +177,10 @@ export default function Utilisateurs() {
   }, [token]);
 
   // --------- FETCH LISTE DES ADMINS ----------
-  const fetchAdmins = useCallback(async () => {
+  const fetchAdmins = useCallback(async (opts = {}) => {
     if (!API_URL || !token) return;
+
+    const currentPage = opts.page || page;
 
     // cancel previous
     if (listAbort.current) listAbort.current.abort();
@@ -186,11 +195,12 @@ export default function Utilisateurs() {
         status: statusFilter || undefined,
         sub: subFilter || undefined,
         role: "admin", // on force côté API
-        page,
+        page: currentPage,
         pageSize: PAGE_SIZE,
       };
 
       let list = [];
+      let hasMore = false;
 
       // 1) route dédiée si dispo
       const r1 = await axios.get(`${API_URL}/api/admins`, {
@@ -202,13 +212,19 @@ export default function Utilisateurs() {
       });
 
       if (r1.status >= 200 && r1.status < 300) {
-        list = Array.isArray(r1.data?.items)
-          ? r1.data.items
-          : Array.isArray(r1.data?.admins)
-          ? r1.data.admins
-          : Array.isArray(r1.data)
-          ? r1.data
-          : [];
+        // formats possibles : {items,total} ou {admins} ou []
+        const items =
+          Array.isArray(r1.data?.items)
+            ? r1.data.items
+            : Array.isArray(r1.data?.admins)
+            ? r1.data.admins
+            : Array.isArray(r1.data)
+            ? r1.data
+            : [];
+        list = items;
+        // déduction "hasMore"
+        const total = Number(r1.data?.total || 0);
+        hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
         // 2) fallback -> /api/users
         const r2 = await axios.get(`${API_URL}/api/users`, {
@@ -220,32 +236,42 @@ export default function Utilisateurs() {
         });
         if (r2.status >= 400)
           throw new Error(r2.data?.message || `Erreur API (${r2.status})`);
-        list = Array.isArray(r2.data?.items)
-          ? r2.data.items
-          : Array.isArray(r2.data?.users)
-          ? r2.data.users
-          : [];
+        const items =
+          Array.isArray(r2.data?.items)
+            ? r2.data.items
+            : Array.isArray(r2.data?.users)
+            ? r2.data.users
+            : Array.isArray(r2.data)
+            ? r2.data
+            : [];
+        list = items;
+        const total = Number(r2.data?.total || 0);
+        hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       }
 
       // garde-fou client : conserve uniquement role=admin
       list = list.filter((u) => norm(u.role) === "admin");
 
       safeSet(setUsers)(list);
+      safeSet(setServerHasMore)(hasMore);
     } catch (e) {
       if (e.name === "CanceledError" || e.message === "canceled") return;
       toast.error(normalizeErr(e, "Erreur chargement administrateurs"));
       safeSet(setUsers)([]);
+      safeSet(setServerHasMore)(false);
     } finally {
       setLoadingList(false);
     }
   }, [API_URL, token, debouncedQ, communeId, statusFilter, subFilter, page]);
 
+  // auto refresh when filters change
   useEffect(() => {
     if (!loadingMe && me) {
-      fetchAdmins();
+      setPage(1);
+      fetchAdmins({ page: 1 });
       loadPlans();
     }
-  }, [loadingMe, me, fetchAdmins, loadPlans]);
+  }, [loadingMe, me, debouncedQ, communeId, statusFilter, subFilter, fetchAdmins, loadPlans]);
 
   // communes list (à partir des admins filtrés)
   const communes = useMemo(() => {
@@ -302,17 +328,13 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      // force le rôle admin pour éviter de quitter le listing après update
-      const payload = { ...editUser, role: "admin" };
-      const r = await axios.put(
-        `${API_URL}/api/users/${editUser._id || editUser.id}`,
-        payload,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 20000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        }
-      );
+      const id = safeId(editUser);
+      const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
+      const r = await axios.put(`${API_URL}/api/users/${id}`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 20000,
+        validateStatus: (s) => s >= 200 && s < 500,
+      });
       if (r.status >= 400)
         throw new Error(r.data?.message || "Échec de la mise à jour");
       toast.success("Administrateur mis à jour ✅");
@@ -327,10 +349,13 @@ export default function Utilisateurs() {
   };
 
   const toggleActive = async (u) => {
+    const id = safeId(u);
     try {
+      setRowBusyId(id);
+      setRowBusyAction("toggle");
       const next = !(u.isActive !== false);
       const r = await axios.post(
-        `${API_URL}/api/users/${u._id || u.id}/toggle-active`,
+        `${API_URL}/api/users/${id}/toggle-active`,
         { active: next },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -345,6 +370,9 @@ export default function Utilisateurs() {
       fetchAdmins();
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur activation"));
+    } finally {
+      setRowBusyId(null);
+      setRowBusyAction("");
     }
   };
 
@@ -360,11 +388,18 @@ export default function Utilisateurs() {
 
   const startOrRenew = async (mode = "start") => {
     if (!subUser) return;
+    if (!subPayload.planId) {
+      toast.error("Choisis un plan avant de continuer.");
+      return;
+    }
     const endpoint = mode === "renew" ? "renew" : "start";
+    const id = safeId(subUser);
     try {
       setDoingAction(true);
+      setRowBusyId(id);
+      setRowBusyAction(`sub-${endpoint}`);
       const r = await axios.post(
-        `${API_URL}/api/subscriptions/${subUser._id || subUser.id}/${endpoint}`,
+        `${API_URL}/api/subscriptions/${id}/${endpoint}`,
         subPayload,
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -384,15 +419,20 @@ export default function Utilisateurs() {
       toast.error(normalizeErr(e, `Erreur ${mode}`));
     } finally {
       setDoingAction(false);
+      setRowBusyId(null);
+      setRowBusyAction("");
     }
   };
 
   const cancelSub = async () => {
     if (!subUser) return;
+    const id = safeId(subUser);
     try {
       setDoingAction(true);
+      setRowBusyId(id);
+      setRowBusyAction("sub-cancel");
       const r = await axios.post(
-        `${API_URL}/api/subscriptions/${subUser._id || subUser.id}/cancel`,
+        `${API_URL}/api/subscriptions/${id}/cancel`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -410,28 +450,33 @@ export default function Utilisateurs() {
       toast.error(normalizeErr(e, "Erreur annulation"));
     } finally {
       setDoingAction(false);
+      setRowBusyId(null);
+      setRowBusyAction("");
     }
   };
 
   const openInvoices = async (u) => {
+    const id = safeId(u);
     setInvUser(u);
     setShowInvoices(true);
     setLoadingInvoices(true);
     try {
-      const r = await axios.get(
-        `${API_URL}/api/users/${u._id || u.id}/invoices`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 20000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        }
-      );
+      const r = await axios.get(`${API_URL}/api/users/${id}/invoices`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 20000,
+        validateStatus: (s) => s >= 200 && s < 500,
+      });
       if (r.status >= 400)
         throw new Error(r.data?.message || "Factures indisponibles");
       const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
       setInvoices(arr);
     } catch (e) {
-      toast.error(normalizeErr(e, "Erreur factures"));
+      toast.error(
+        normalizeErr(
+          e,
+          "Erreur factures (vérifie que la route /api/users/:id/invoices existe)"
+        )
+      );
       setInvoices([]);
     } finally {
       setLoadingInvoices(false);
@@ -450,7 +495,6 @@ export default function Utilisateurs() {
     }
     try {
       setCreating(true);
-      // force role=admin ; si le backend stocke createdBy il pourra utiliser me._id
       const payload = {
         ...createForm,
         role: "admin",
@@ -520,6 +564,13 @@ export default function Utilisateurs() {
             >
               <FileText size={16} /> Export CSV
             </button>
+            <button
+              onClick={() => fetchAdmins({ page })}
+              className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-2"
+              title="Rafraîchir"
+            >
+              <RefreshCw size={16} /> Rafraîchir
+            </button>
           </div>
         </div>
 
@@ -535,6 +586,12 @@ export default function Utilisateurs() {
                     placeholder="email, nom…"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        setPage(1);
+                        fetchAdmins({ page: 1 });
+                      }
+                    }}
                   />
                   <Search
                     className="absolute right-2 top-2.5 text-gray-400"
@@ -610,7 +667,7 @@ export default function Utilisateurs() {
             <button
               onClick={() => {
                 setPage(1);
-                fetchAdmins();
+                fetchAdmins({ page: 1 });
               }}
               className="px-4 py-2 bg-gray-900 text-white rounded flex items-center gap-2"
             >
@@ -705,115 +762,171 @@ export default function Utilisateurs() {
               <Loader2 className="animate-spin" size={16} /> Chargement…
             </div>
           ) : users.length === 0 ? (
-            <div className="text-gray-500">Aucun administrateur trouvé.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full border border-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {[
-                      "Email",
-                      "Nom",
-                      "Commune",
-                      "Statut",
-                      "Abonnement",
-                      "Actions",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => {
-                    const id = u._id || u.id;
-                    const commune = u.communeName || u.communeId || "—";
-                    const active = !(u.isActive === false);
-                    const subStatus =
-                      u.subscriptionStatus ||
-                      (u.subscriptionEndAt ? "active" : "none");
-                    const subEnd = u.subscriptionEndAt
-                      ? new Date(u.subscriptionEndAt).toLocaleDateString()
-                      : null;
-                    return (
-                      <tr key={id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 border-b text-sm">{u.email}</td>
-                        <td className="px-4 py-2 border-b text-sm">
-                          {u.name || "—"}
-                        </td>
-                        <td className="px-4 py-2 border-b text-sm">{commune}</td>
-                        <td className="px-4 py-2 border-b text-sm">
-                          <Pill ok={active}>{active ? "Actif" : "Inactif"}</Pill>
-                        </td>
-                        <td className="px-4 py-2 border-b text-sm">
-                          <div className="flex items-center gap-2">
-                            <Pill
-                              ok={subStatus === "active"}
-                              title={subEnd ? `Jusqu'au ${subEnd}` : ""}
-                            >
-                              {subStatus === "active"
-                                ? "Actif"
-                                : subStatus === "expired"
-                                ? "Expiré"
-                                : "Aucun"}
-                            </Pill>
-                            {subEnd && (
-                              <span className="text-xs text-gray-500">
-                                ({subEnd})
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 border-b text-sm">
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              className="px-2 py-1 border rounded hover:bg-gray-50"
-                              onClick={() => openEdit(u)}
-                              title="Éditer infos"
-                            >
-                              Éditer
-                            </button>
-                            <button
-                              className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                              onClick={() => toggleActive(u)}
-                              title="Activer/Désactiver"
-                            >
-                              {active ? (
-                                <>
-                                  <ShieldBan size={14} /> Désactiver
-                                </>
-                              ) : (
-                                <>
-                                  <ShieldCheck size={14} /> Activer
-                                </>
-                              )}
-                            </button>
-                            <button
-                              className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                              onClick={() => openSub(u)}
-                              title="Gérer l'abonnement"
-                            >
-                              <Wallet size={14} /> Abonnement
-                            </button>
-                            <button
-                              className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1"
-                              onClick={() => openInvoices(u)}
-                              title="Factures"
-                            >
-                              <CreditCard size={14} /> Factures
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="text-gray-500">
+              Aucun administrateur trouvé. Ajuste les filtres ou crée un compte.
             </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border border-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {[
+                        "Email",
+                        "Nom",
+                        "Commune",
+                        "Statut",
+                        "Abonnement",
+                        "Actions",
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u) => {
+                      const id = safeId(u);
+                      const commune = u.communeName || u.communeId || "—";
+                      const active = !(u.isActive === false);
+                      const subStatus =
+                        u.subscriptionStatus ||
+                        (u.subscriptionEndAt ? "active" : "none");
+                      const subEnd = u.subscriptionEndAt
+                        ? new Date(u.subscriptionEndAt).toLocaleDateString()
+                        : null;
+
+                      const isRowBusy = rowBusyId === id;
+
+                      return (
+                        <tr key={id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2 border-b text-sm">{u.email}</td>
+                          <td className="px-4 py-2 border-b text-sm">
+                            {u.name || "—"}
+                          </td>
+                          <td className="px-4 py-2 border-b text-sm">{commune}</td>
+                          <td className="px-4 py-2 border-b text-sm">
+                            <div className="flex items-center gap-2">
+                              <Pill ok={active}>
+                                {active ? "Actif" : "Inactif"}
+                              </Pill>
+                              {isRowBusy && rowBusyAction === "toggle" && (
+                                <Loader2 className="animate-spin text-gray-400" size={14} />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 border-b text-sm">
+                            <div className="flex items-center gap-2">
+                              <Pill
+                                ok={subStatus === "active"}
+                                title={subEnd ? `Jusqu'au ${subEnd}` : ""}
+                              >
+                                {subStatus === "active"
+                                  ? "Actif"
+                                  : subStatus === "expired"
+                                  ? "Expiré"
+                                  : "Aucun"}
+                              </Pill>
+                              {subEnd && (
+                                <span className="text-xs text-gray-500">
+                                  ({subEnd})
+                                </span>
+                              )}
+                              {isRowBusy &&
+                                (rowBusyAction.startsWith("sub-")) && (
+                                  <Loader2 className="animate-spin text-gray-400" size={14} />
+                                )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 border-b text-sm">
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                                onClick={() => openEdit(u)}
+                                title="Éditer infos"
+                                disabled={isRowBusy}
+                              >
+                                Éditer
+                              </button>
+
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
+                                onClick={() => toggleActive(u)}
+                                title="Activer/Désactiver"
+                                disabled={isRowBusy}
+                              >
+                                {active ? (
+                                  <>
+                                    <ShieldBan size={14} /> Désactiver
+                                  </>
+                                ) : (
+                                  <>
+                                    <ShieldCheck size={14} /> Activer
+                                  </>
+                                )}
+                              </button>
+
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
+                                onClick={() => openSub(u)}
+                                title="Gérer l'abonnement"
+                                disabled={isRowBusy}
+                              >
+                                <Wallet size={14} /> Abonnement
+                              </button>
+
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
+                                onClick={() => openInvoices(u)}
+                                title="Factures"
+                                disabled={isRowBusy}
+                              >
+                                <CreditCard size={14} /> Factures
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination simple */}
+              <div className="mt-3 flex items-center justify-between">
+                <div className="text-xs text-gray-500">
+                  Page {page} • {users.length} élément(s)
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 border rounded disabled:opacity-50"
+                    disabled={page <= 1 || loadingList}
+                    onClick={() => {
+                      const p = Math.max(1, page - 1);
+                      setPage(p);
+                      fetchAdmins({ page: p });
+                    }}
+                  >
+                    ◀ Précédent
+                  </button>
+                  <button
+                    className="px-3 py-1.5 border rounded disabled:opacity-50"
+                    disabled={!serverHasMore || loadingList}
+                    onClick={() => {
+                      const p = page + 1;
+                      setPage(p);
+                      fetchAdmins({ page: p });
+                    }}
+                  >
+                    Suivant ▶
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -951,21 +1064,21 @@ export default function Utilisateurs() {
               <XIcon size={16} /> Fermer
             </button>
             <button
-              className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
+              className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
               onClick={() => startOrRenew("start")}
               disabled={doingAction}
             >
               <BadgeCheck size={16} /> {doingAction ? "Traitement…" : "Démarrer"}
             </button>
             <button
-              className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1"
+              className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
               onClick={() => startOrRenew("renew")}
               disabled={doingAction}
             >
               <RotateCcw size={16} /> Renouveler
             </button>
             <button
-              className="px-3 py-2 border rounded hover:bg-red-600 text-red-600 hover:text-white flex items-center gap-1"
+              className="px-3 py-2 border rounded hover:bg-red-600 text-red-600 hover:text-white flex items-center gap-1 disabled:opacity-50"
               onClick={cancelSub}
               disabled={doingAction}
             >

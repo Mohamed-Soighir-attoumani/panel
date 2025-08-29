@@ -3,7 +3,6 @@ import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
-import IncidentsChart from "../components/IncidentsChart";
 import DevicesTable from "../components/DevicesTable";
 import { API_URL } from "../config";
 
@@ -23,15 +22,47 @@ function buildHeaders(me) {
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  // Admin : forcer sa commune
   if (me?.role === "admin" && me?.communeId) {
     headers["x-commune-id"] = me.communeId;
   }
+  // Superadmin : commune choisie (ou vide => tout)
   if (me?.role === "superadmin") {
     const selectedCid =
       (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
-    if (selectedCid) headers["x-commune-id"] = selectedCid; // sinon rien => tout
+    if (selectedCid) headers["x-commune-id"] = selectedCid;
   }
   return headers;
+}
+
+/** Construit une série temporelle :
+ * - par jour si period === '7' ou '30'
+ * - par mois si period === 'all'
+ */
+function buildTimeSeries(incidents, period) {
+  const map = new Map(); // key -> count
+
+  for (const inc of incidents) {
+    if (!inc.createdAt) continue;
+    const d = new Date(inc.createdAt);
+
+    let key;
+    if (period === "7" || period === "30") {
+      // Jour
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate()
+      ).padStart(2, "0")}`;
+    } else {
+      // Mois
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    }
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+
+  // Tri chrono
+  const labels = Array.from(map.keys()).sort();
+  const data = labels.map((k) => map.get(k));
+  return { labels, data };
 }
 
 const DashboardPage = () => {
@@ -147,25 +178,39 @@ const DashboardPage = () => {
     return () => clearInterval(interval);
   }, [period, me, loadingMe]);
 
-  // ==== Série temporelle
-  const dynamicChartData = useMemo(() => {
-    const monthMap = {};
-    incidents.forEach((inc) => {
-      if (inc.createdAt) {
-        const d = new Date(inc.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        monthMap[k] = (monthMap[k] || 0) + 1;
-      }
-    });
-    const labels = Object.keys(monthMap).sort();
-    const data = labels.map((k) => monthMap[k]);
-    return { labels, data };
-  }, [incidents]);
+  // ==== Série temporelle (Line chart)
+  const { labels: tsLabels, data: tsData } = useMemo(
+    () => buildTimeSeries(incidents, period),
+    [incidents, period]
+  );
+
+  const lineChartData = useMemo(
+    () => ({
+      labels: tsLabels,
+      datasets: [
+        {
+          label: period === "all" ? "Incidents par mois" : "Incidents par jour",
+          data: tsData,
+          borderWidth: 2,
+          pointRadius: 3,
+          fill: false,
+        },
+      ],
+    }),
+    [tsLabels, tsData, period]
+  );
 
   const lineChartOptions = {
-    animation: { duration: 1000, easing: "easeInOutQuart" },
+    animation: { duration: 600, easing: "easeInOutQuart" },
     responsive: true,
-    plugins: { legend: { position: "top" }, tooltip: { mode: "index", intersect: false } },
+    plugins: {
+      legend: { position: "top" },
+      tooltip: { mode: "index", intersect: false },
+    },
+    scales: {
+      x: { ticks: { autoSkip: true, maxRotation: 0 } },
+      y: { beginAtZero: true, precision: 0 },
+    },
   };
 
   // ==== Répartition par types
@@ -271,22 +316,20 @@ const DashboardPage = () => {
             <option value="all">Tous</option>
           </select>
 
-          {/* (Optionnel) Sélecteur de commune pour superadmin */}
+          {/* (Optionnel) Sélecteur commune pour superadmin */}
           {me?.role === "superadmin" && (
-            <>
-              <input
-                placeholder="Filtrer communeId (laisser vide = toutes)"
-                className="border px-2 py-1 rounded w-full sm:w-64"
-                defaultValue={localStorage.getItem("selectedCommuneId") || ""}
-                onBlur={(e) => {
-                  const v = e.target.value.trim();
-                  if (v) localStorage.setItem("selectedCommuneId", v);
-                  else localStorage.removeItem("selectedCommuneId");
-                  fetchData();
-                  fetchDeviceCount();
-                }}
-              />
-            </>
+            <input
+              placeholder="Filtrer communeId (laisser vide = toutes)"
+              className="border px-2 py-1 rounded w-full sm:w-64"
+              defaultValue={localStorage.getItem("selectedCommuneId") || ""}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v) localStorage.setItem("selectedCommuneId", v);
+                else localStorage.removeItem("selectedCommuneId");
+                fetchData();
+                fetchDeviceCount();
+              }}
+            />
           )}
 
           <button
@@ -298,6 +341,7 @@ const DashboardPage = () => {
         </div>
       </div>
 
+      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
         <KpiCard
           icon="🚨"
@@ -316,21 +360,35 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      <IncidentsChart />
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
-        {typeLabels.length === 0 ? (
-          <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+      {/* 🔵 Courbe du fil de temps */}
+      <div className="bg-white p-4 rounded shadow mb-8">
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">📈 Évolution des incidents</h3>
+        {tsLabels.length === 0 ? (
+          <p className="text-gray-500">Aucune donnée pour la période choisie.</p>
         ) : (
-          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+          <Line data={lineChartData} options={lineChartOptions} />
         )}
       </div>
 
+      {/* Répartition des types */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-4 rounded shadow">
+          <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
+          {typeLabels.length === 0 ? (
+            <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+          ) : (
+            <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+          )}
+        </div>
+      </div>
+
+      {/* Table des devices */}
       <div className="mt-6">
         <DevicesTable />
       </div>
 
-      <div className="bg-white p-4 shadow rounded">
+      {/* Activité récente */}
+      <div className="bg-white p-4 shadow rounded mt-6">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (
           <p className="text-gray-500">Aucune activité récente.</p>

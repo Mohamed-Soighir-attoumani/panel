@@ -273,7 +273,7 @@ export default function Header() {
             className="fixed top-[56px] z-40 w-full lg:ml-64 lg:w-[calc(100%-16rem)] bg-gradient-to-r from-red-100 to-orange-100 text-black border-t border-red-300 shadow"
           >
             <div className="px-4 py-2">
-              <div className="flex flex-wrap justify-center gap-2 text-xs sm:text-sm font-medium text-gray-800 text-center">
+              <div className="min-h-screen bg-gray-50 pt-[72px] md:pt-[88px] px-4">
                 <p><strong>👮 Police :</strong> 17</p>
                 <p><strong>🚓 Gendarmerie :</strong> 06 39 00 00 00</p>
                 <p><strong>🚒 Pompiers :</strong> 18</p>

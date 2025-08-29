@@ -1,4 +1,3 @@
-// src/pages/DashboardPage.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { Line, Bar } from "react-chartjs-2";
@@ -10,7 +9,7 @@ import { API_URL } from "../config";
 
 ChartJS.register(...registerables, ChartDataLabels);
 
-// Normalise les libellés de type (déduplication insensible à la casse/espaces)
+// Normalise les libellés de type
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
   const s = String(raw).trim();
@@ -19,7 +18,26 @@ function canonicalizeLabel(raw) {
   return { key, label };
 }
 
+function buildHeaders(me) {
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = me.communeId;
+  }
+  if (me?.role === "superadmin") {
+    const selectedCid =
+      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    if (selectedCid) headers["x-commune-id"] = selectedCid; // sinon rien => tout
+  }
+  return headers;
+}
+
 const DashboardPage = () => {
+  const [me, setMe] = useState(null);
+  const [loadingMe, setLoadingMe] = useState(true);
+
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [period, setPeriod] = useState("7"); // "7" | "30" | "all"
@@ -27,9 +45,27 @@ const DashboardPage = () => {
   const [deviceCount, setDeviceCount] = useState(0);
   const [incidentTotal, setIncidentTotal] = useState(0);
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
-  const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+  // charge /api/me
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem("token") || "";
+        const res = await axios.get(`${API_URL}/api/me`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          timeout: 15000,
+        });
+        const user = res?.data?.user || null;
+        setMe(user);
+        localStorage.setItem("me", JSON.stringify(user));
+      } catch {
+        localStorage.removeItem("token");
+        localStorage.removeItem("token_orig");
+        window.location.href = "/login";
+      } finally {
+        setLoadingMe(false);
+      }
+    })();
+  }, []);
 
   const handleAuthError = (err) => {
     const status = err?.response?.status;
@@ -43,24 +79,19 @@ const DashboardPage = () => {
   };
 
   const fetchData = async () => {
+    if (loadingMe) return;
     try {
-      // si "all", on ne filtre pas; sinon on passe ?period=7|30
+      const headers = buildHeaders(me);
       const qs = period === "all" ? "" : `?period=${period}`;
 
       const [incidentRes, notifRes, totalRes] = await Promise.all([
-        axios.get(`${API_URL}/api/incidents${qs}`, { headers: authHeaders }),
-        axios.get(`${API_URL}/api/notifications`, { headers: authHeaders }),
-        axios.get(`${API_URL}/api/incidents/count${qs}`, {
-          headers: authHeaders,
-        }),
+        axios.get(`${API_URL}/api/incidents${qs}`, { headers }),
+        axios.get(`${API_URL}/api/notifications`, { headers }),
+        axios.get(`${API_URL}/api/incidents/count${qs}`, { headers }),
       ]);
 
-      const realIncidents = Array.isArray(incidentRes.data)
-        ? incidentRes.data
-        : [];
-      const realNotifications = Array.isArray(notifRes.data)
-        ? notifRes.data
-        : [];
+      const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
+      const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
       const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
@@ -73,17 +104,13 @@ const DashboardPage = () => {
           return {
             type: "incident",
             text: `Incident "${t}" signalé`,
-            time: inc.createdAt
-              ? new Date(inc.createdAt).toLocaleString()
-              : "Date inconnue",
+            time: inc.createdAt ? new Date(inc.createdAt).toLocaleString() : "Date inconnue",
           };
         }),
         ...realNotifications.slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif.title || notif.message || "Sans titre"}`,
-          time: notif.createdAt
-            ? new Date(notif.createdAt).toLocaleString()
-            : "Date inconnue",
+          time: notif.createdAt ? new Date(notif.createdAt).toLocaleString() : "Date inconnue",
         })),
       ]);
     } catch (err) {
@@ -94,10 +121,10 @@ const DashboardPage = () => {
   };
 
   const fetchDeviceCount = async () => {
+    if (loadingMe) return;
     try {
-      const res = await axios.get(`${API_URL}/api/devices/count`, {
-        headers: authHeaders,
-      });
+      const headers = buildHeaders(me);
+      const res = await axios.get(`${API_URL}/api/devices/count`, { headers });
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
       } else {
@@ -118,7 +145,7 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
-  }, [period, token]);
+  }, [period, me, loadingMe]);
 
   // ==== Série temporelle
   const dynamicChartData = useMemo(() => {
@@ -126,10 +153,7 @@ const DashboardPage = () => {
     incidents.forEach((inc) => {
       if (inc.createdAt) {
         const d = new Date(inc.createdAt);
-        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-          2,
-          "0"
-        )}`;
+        const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         monthMap[k] = (monthMap[k] || 0) + 1;
       }
     });
@@ -141,15 +165,12 @@ const DashboardPage = () => {
   const lineChartOptions = {
     animation: { duration: 1000, easing: "easeInOutQuart" },
     responsive: true,
-    plugins: {
-      legend: { position: "top" },
-      tooltip: { mode: "index", intersect: false },
-    },
+    plugins: { legend: { position: "top" }, tooltip: { mode: "index", intersect: false } },
   };
 
-  // ==== Répartition par types (vraies catégories dynamiques)
+  // ==== Répartition par types
   const { typeLabels, typeCounts } = useMemo(() => {
-    const map = new Map(); // key -> { label, count }
+    const map = new Map();
     for (const inc of incidents) {
       const raw = inc.type || inc.title || "Inconnu";
       const { key, label } = canonicalizeLabel(raw);
@@ -237,6 +258,7 @@ const DashboardPage = () => {
         <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">
           📊 Tableau de bord
         </h1>
+
         <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
           <label className="font-medium">📅 Période :</label>
           <select
@@ -248,6 +270,25 @@ const DashboardPage = () => {
             <option value="30">30 derniers jours</option>
             <option value="all">Tous</option>
           </select>
+
+          {/* (Optionnel) Sélecteur de commune pour superadmin */}
+          {me?.role === "superadmin" && (
+            <>
+              <input
+                placeholder="Filtrer communeId (laisser vide = toutes)"
+                className="border px-2 py-1 rounded w-full sm:w-64"
+                defaultValue={localStorage.getItem("selectedCommuneId") || ""}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v) localStorage.setItem("selectedCommuneId", v);
+                  else localStorage.removeItem("selectedCommuneId");
+                  fetchData();
+                  fetchDeviceCount();
+                }}
+              />
+            </>
+          )}
+
           <button
             onClick={fetchData}
             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
@@ -270,47 +311,27 @@ const DashboardPage = () => {
           value={incidents.filter((i) => i.status === "Résolu").length}
           color="text-green-600"
         />
-        <KpiCard
-          icon="📋"
-          label="Incidents TOTAL"
-          value={incidents.length}
-          color="text-blue-600"
-        />
-        <KpiCard
-          icon="🔔"
-          label="Notifications"
-          value={notifications.length}
-          color="text-purple-600"
-        />
-        <KpiCard
-          icon="👥"
-          label="Utilisateurs"
-          value={deviceCount}
-          color="text-gray-800"
-        />
+        <KpiCard icon="📋" label="Incidents TOTAL" value={incidents.length} color="text-blue-600" />
+        <KpiCard icon="🔔" label="Notifications" value={notifications.length} color="text-purple-600" />
+        <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
       <IncidentsChart />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
-
-
-          {typeLabels.length === 0 ? (
-            <p className="text-gray-500">Aucun incident pour la période choisie.</p>
-          ) : (
-            <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
-          )}
-        </div>
-  
+        {typeLabels.length === 0 ? (
+          <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+        ) : (
+          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+        )}
+      </div>
 
       <div className="mt-6">
         <DevicesTable />
       </div>
 
       <div className="bg-white p-4 shadow rounded">
-        <h3 className="text-lg sm:text-xl font-semibold mb-4">
-          📜 Activité Récente
-        </h3>
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (
           <p className="text-gray-500">Aucune activité récente.</p>
         ) : (

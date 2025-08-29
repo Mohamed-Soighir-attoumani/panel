@@ -1,63 +1,81 @@
-import React, { useEffect, useState } from "react";
-import axios from "axios";
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid, ResponsiveContainer,
-} from "recharts";
+import React, { useMemo } from "react";
+import { Line } from "react-chartjs-2";
+import { Chart as ChartJS, registerables } from "chart.js";
 
-const IncidentsChart = () => {
-  const [data, setData] = useState([]);
+ChartJS.register(...registerables);
 
-  useEffect(() => {
-    fetchIncidents();
-  }, []);
+/** Construit une série temporelle :
+ * - par jour si period === '7' ou '30'
+ * - par mois si period === 'all'
+ */
+function buildTimeSeries(incidents, period) {
+  const map = new Map(); // key -> count
 
-  const fetchIncidents = async () => {
-    try {
-      const res = await axios.get("https://backend-admin-tygd.onrender.com/api/incidents");
+  for (const inc of incidents) {
+    if (!inc?.createdAt) continue;
+    const d = new Date(inc.createdAt);
 
-      // Regrouper les incidents par mois
-      const incidentsByMonth = Array(12).fill(0); // index 0 = janvier, 11 = décembre
-
-      res.data.forEach((incident) => {
-        const date = new Date(incident.createdAt);
-        const monthIndex = date.getMonth(); // 0 à 11
-        incidentsByMonth[monthIndex]++;
-      });
-
-      // Générer les données pour Recharts
-      const chartData = incidentsByMonth.map((count, index) => ({
-        month: new Date(2025, index).toLocaleString('fr-FR', { month: 'short' }),
-        incidents: count,
-      }));
-
-      setData(chartData);
-    } catch (error) {
-      console.error("Erreur chargement incidents :", error);
+    let key;
+    if (period === "7" || period === "30") {
+      // Jour
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+        d.getDate()
+      ).padStart(2, "0")}`;
+    } else {
+      // Mois
+      key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     }
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+
+  const labels = Array.from(map.keys()).sort();
+  const data = labels.map((k) => map.get(k));
+  return { labels, data };
+}
+
+export default function IncidentsChart({ incidents = [], period = "7" }) {
+  const { labels, data } = useMemo(
+    () => buildTimeSeries(incidents, period),
+    [incidents, period]
+  );
+
+  const chartData = useMemo(
+    () => ({
+      labels,
+      datasets: [
+        {
+          label: period === "all" ? "Incidents par mois" : "Incidents par jour",
+          data,
+          borderWidth: 2,
+          pointRadius: 3,
+          fill: false,
+        },
+      ],
+    }),
+    [labels, data, period]
+  );
+
+  const options = {
+    animation: { duration: 600, easing: "easeInOutQuart" },
+    responsive: true,
+    plugins: {
+      legend: { position: "top" },
+      tooltip: { mode: "index", intersect: false },
+    },
+    scales: {
+      x: { ticks: { autoSkip: true, maxRotation: 0 } },
+      y: { beginAtZero: true, precision: 0 },
+    },
   };
 
   return (
-    <div className="bg-white p-4 rounded shadow mt-6">
-      <h2 className="text-xl font-semibold mb-4">📈 Incidents au Fil du Temps</h2>
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="month" />
-          <YAxis allowDecimals={false} />
-          <Tooltip />
-          <Legend />
-          <Line
-            type="monotone"
-            dataKey="incidents"
-            name="Nombre d'incidents"
-            stroke="#00bcd4"
-            strokeWidth={3}
-            activeDot={{ r: 6 }}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+    <div className="bg-white p-4 rounded shadow mb-8">
+      <h3 className="text-lg sm:text-xl font-semibold mb-4">📈 Évolution des incidents</h3>
+      {labels.length === 0 ? (
+        <p className="text-gray-500">Aucune donnée pour la période choisie.</p>
+      ) : (
+        <Line data={chartData} options={options} />
+      )}
     </div>
   );
-};
-
-export default IncidentsChart;
+}

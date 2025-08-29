@@ -9,6 +9,8 @@ import { API_URL } from "../config";
 
 ChartJS.register(...registerables, ChartDataLabels);
 
+const nf = new Intl.NumberFormat("fr-FR");
+
 // Normalise les libellés de type
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
@@ -45,7 +47,6 @@ const DashboardPage = () => {
   const [period, setPeriod] = useState("7"); // "7" | "30" | "all"
   const [activity, setActivity] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
-  const [incidentTotal, setIncidentTotal] = useState(0);
 
   // charge /api/me
   useEffect(() => {
@@ -86,19 +87,16 @@ const DashboardPage = () => {
       const headers = buildHeaders(me);
       const qs = period === "all" ? "" : `?period=${period}`;
 
-      const [incidentRes, notifRes, totalRes] = await Promise.all([
+      const [incidentRes, notifRes] = await Promise.all([
         axios.get(`${API_URL}/api/incidents${qs}`, { headers }),
         axios.get(`${API_URL}/api/notifications`, { headers }),
-        axios.get(`${API_URL}/api/incidents/count${qs}`, { headers }),
       ]);
 
       const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
       const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
-      const total = totalRes.data?.total || 0;
 
       setIncidents(realIncidents);
       setNotifications(realNotifications);
-      setIncidentTotal(total);
 
       setActivity([
         ...realIncidents.slice(0, 3).map((inc) => {
@@ -106,13 +104,15 @@ const DashboardPage = () => {
           return {
             type: "incident",
             text: `Incident "${t}" signalé`,
-            time: inc.createdAt ? new Date(inc.createdAt).toLocaleString() : "Date inconnue",
+            time: inc.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
           };
         }),
         ...realNotifications.slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif.title || notif.message || "Sans titre"}`,
-          time: notif.createdAt ? new Date(notif.createdAt).toLocaleString() : "Date inconnue",
+          time: notif.createdAt
+            ? new Date(notif.createdAt).toLocaleString("fr-FR")
+            : "Date inconnue",
         })),
       ]);
     } catch (err) {
@@ -129,8 +129,6 @@ const DashboardPage = () => {
       const res = await axios.get(`${API_URL}/api/devices/count`, { headers });
       if (res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
-      } else {
-        console.warn("Réponse device count inattendue:", res.data);
       }
     } catch (err) {
       if (!handleAuthError(err)) {
@@ -165,20 +163,32 @@ const DashboardPage = () => {
 
   const barChartOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
-      tooltip: { enabled: true },
+      tooltip: {
+        enabled: true,
+        callbacks: {
+          label: (ctx) => nf.format(ctx.parsed.y ?? 0),
+        },
+      },
       datalabels: {
         anchor: "end",
         align: "top",
         color: "#000",
         font: { weight: "bold", size: 12 },
-        formatter: (value) => value,
+        formatter: (value) => nf.format(value),
       },
     },
     scales: {
       x: { ticks: { autoSkip: false, maxRotation: 40, minRotation: 0 } },
-      y: { beginAtZero: true, precision: 0 },
+      y: {
+        beginAtZero: true,
+        precision: 0,
+        ticks: {
+          callback: (v) => nf.format(v),
+        },
+      },
     },
   };
 
@@ -209,7 +219,7 @@ const DashboardPage = () => {
           align: "top",
           color: "#000",
           font: { weight: "bold", size: 12 },
-          formatter: (value) => value,
+          formatter: (value) => nf.format(value),
         },
       },
     ],
@@ -219,7 +229,7 @@ const DashboardPage = () => {
     <div className="bg-white p-3 sm:p-4 rounded shadow text-center hover:shadow-lg transition duration-300 text-sm sm:text-base">
       <div className="text-2xl sm:text-3xl mb-1">{icon}</div>
       <p className="text-gray-500 text-xs sm:text-sm">{label}</p>
-      <p className={`text-xl sm:text-2xl font-bold ${color}`}>{value}</p>
+      <p className={`text-xl sm:text-2xl font-bold ${color}`}>{nf.format(value)}</p>
     </div>
   );
 
@@ -252,7 +262,7 @@ const DashboardPage = () => {
             <option value="all">Tous</option>
           </select>
 
-          {/* (Optionnel) Sélecteur commune pour superadmin */}
+          {/* Sélecteur commune pour superadmin */}
           {me?.role === "superadmin" && (
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
@@ -296,19 +306,17 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      {/* 🔵 Courbe du fil de temps via composant */}
+      {/* 📈 Courbe du fil de temps (dates FR + nombres FR) */}
       <IncidentsChart incidents={incidents} period={period} />
 
-      {/* Répartition des types */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-4 rounded shadow">
-          <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
-          {typeLabels.length === 0 ? (
-            <p className="text-gray-500">Aucun incident pour la période choisie.</p>
-          ) : (
-            <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
-          )}
-        </div>
+      {/* 🧭 Répartition par types — pleine largeur */}
+      <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
+        {typeLabels.length === 0 ? (
+          <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+        ) : (
+          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+        )}
       </div>
 
       {/* Table des devices */}

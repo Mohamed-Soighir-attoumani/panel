@@ -1,9 +1,9 @@
 import L from "leaflet";
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config"; // 🔗 Lien avec backend via config.js
+import { API_URL } from "../config"; // 🔗 backend
 
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
@@ -49,18 +49,65 @@ const GlobalIncidentMap = ({ incidents }) => {
   );
 };
 
+// === helper headers ===
+function buildHeaders(me) {
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Admin => impose sa commune
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = me.communeId;
+  }
+  // Superadmin => si un filtre a été choisi dans le panel, on le prend,
+  // sinon on n’envoie rien => il verra TOUT
+  if (me?.role === "superadmin") {
+    const selectedCid =
+      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    if (selectedCid) headers["x-commune-id"] = selectedCid;
+  }
+  return headers;
+}
+
 const IncidentPage = () => {
+  const [me, setMe] = useState(null);
+  const [loadingMe, setLoadingMe] = useState(true);
+
   const [incidents, setIncidents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
   const [editIncidentId, setEditIncidentId] = useState(null);
   const [editedIncident, setEditedIncident] = useState({});
   const [statusFilter, setStatusFilter] = useState("Tous");
-  const [periodFilter, setPeriodFilter] = useState("");
+  const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
   const lastIncidentIdRef = useRef(null);
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
+
+  // charge /api/me pour connaître le rôle/commune
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem("token") || "";
+        const res = await axios.get(`${API_URL}/api/me`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          timeout: 15000,
+        });
+        const user = res?.data?.user || null;
+        setMe(user);
+        // on met en cache pour d’autres pages
+        localStorage.setItem("me", JSON.stringify(user));
+      } catch {
+        // si non connecté → redir
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+      } finally {
+        setLoadingMe(false);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     audioRef.current = new Audio("/sounds/notification.mp3");
@@ -72,14 +119,10 @@ const IncidentPage = () => {
     };
 
     document.addEventListener("click", handleUserInteraction);
-    fetchIncidents();
-
-    const interval = setInterval(fetchIncidents, 5000);
     return () => {
-      clearInterval(interval);
       document.removeEventListener("click", handleUserInteraction);
     };
-  }, [statusFilter, periodFilter]);
+  }, []);
 
   const playNotificationSound = () => {
     if (audioRef.current && isAudioAllowedRef.current) {
@@ -88,12 +131,20 @@ const IncidentPage = () => {
     }
   };
 
-  const fetchIncidents = async () => {
+  const fetchIncidents = useCallback(async () => {
+    if (loadingMe) return; // attend /api/me pour savoir si admin/superadmin
     try {
+      const headers = buildHeaders(me);
+      const params = {};
+      if (periodFilter) params.period = periodFilter;
+
       const response = await axios.get(`${API_URL}/api/incidents`, {
-        params: { period: periodFilter },
+        headers,
+        params,
       });
-      let data = [...response.data].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      let data = Array.isArray(response.data) ? response.data : [];
+      data = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
@@ -114,12 +165,19 @@ const IncidentPage = () => {
       setError("Impossible de charger les incidents.");
       setLoading(false);
     }
-  };
+  }, [me, loadingMe, statusFilter, periodFilter]);
+
+  useEffect(() => {
+    fetchIncidents();
+    const interval = setInterval(fetchIncidents, 5000);
+    return () => clearInterval(interval);
+  }, [fetchIncidents]);
 
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      await axios.delete(`${API_URL}/api/incidents/${id}`);
+      const headers = buildHeaders(me);
+      await axios.delete(`${API_URL}/api/incidents/${id}`, { headers });
       fetchIncidents();
     } catch (error) {
       console.error("Erreur suppression :", error);
@@ -144,10 +202,8 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`,
-        editedIncident,
-        { headers: { "Content-Type": "application/json" } }
-      );
+      const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
+      await axios.put(`${API_URL}/api/incidents/${editIncidentId}`, editedIncident, { headers });
       setEditIncidentId(null);
       fetchIncidents();
     } catch (error) {
@@ -156,7 +212,7 @@ const IncidentPage = () => {
     }
   };
 
-  if (loading) return <div className="p-6">Chargement...</div>;
+  if (loading || loadingMe) return <div className="p-6">Chargement...</div>;
   if (error) return <div className="p-6 text-red-500">{error}</div>;
 
   return (
@@ -167,7 +223,7 @@ const IncidentPage = () => {
 
       {/* Filtres */}
       <div className="flex gap-4 mb-6">
-        <select onChange={(e) => setStatusFilter(e.target.value)} className="input">
+        <select onChange={(e) => setStatusFilter(e.target.value)} className="input" value={statusFilter}>
           <option value="Tous">Tous les statuts</option>
           <option value="En cours">En cours</option>
           <option value="En attente">En attente</option>
@@ -175,14 +231,13 @@ const IncidentPage = () => {
           <option value="Rejeté">Rejeté</option>
         </select>
 
-        <select onChange={(e) => setPeriodFilter(e.target.value)} className="input">
+        <select onChange={(e) => setPeriodFilter(e.target.value)} className="input" value={periodFilter}>
           <option value="">Toute période</option>
           <option value="7">7 derniers jours</option>
           <option value="30">30 derniers jours</option>
         </select>
       </div>
 
-      {/* Liste des incidents */}
       {incidents.length === 0 ? (
         <p className="text-gray-500">Aucun incident pour le moment.</p>
       ) : (
@@ -219,7 +274,6 @@ const IncidentPage = () => {
                   )}
                   <p className="text-sm text-gray-700 mb-2">📝 {incident.adminComment || <em className="text-gray-400">Aucun commentaire</em>}</p>
 
-                  {/* Affichage de l'image ou de la vidéo */}
                   <div className="mt-3">
                     {incident.mediaUrl ? (
                       incident.mediaType === "video" ? (

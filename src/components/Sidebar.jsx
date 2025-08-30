@@ -177,7 +177,7 @@ const Sidebar = () => {
                     : "hover:text-blue-300"
                 }`}
               >
-                ℹ️ Liste : Santé & Propreté
+                ℹ️ Liste Santé & Propreté
               </Link>
             </li>
 

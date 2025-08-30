@@ -16,9 +16,9 @@ import IncidentPage from "./pages/IncidentPage";
 import NotificationsCreate from "./pages/NotificationsCreate";
 import NotificationsList from "./pages/NotificationsList";
 import ArticleCreate from "./pages/ArticleCreate";
-import ArticleListPage from "./pages/ArticleList";
+import ArticleListPage from "./pages/ArticleListPage";
 import ProjectCreate from "./pages/ProjectCreate";
-import ProjectListPage from "./pages/ProjectList";
+import ProjectListPage from "./pages/ProjectListPage";
 
 // Layout
 import Layout from "./components/Layout";

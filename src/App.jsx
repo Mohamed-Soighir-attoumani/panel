@@ -13,8 +13,10 @@ import ChangerPhoto from "./pages/ChangerPhoto";
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
+
+// ⚠️ Si vous avez bien créé ces nouvelles pages, laissez ces imports.
+//    Sinon, commentez-les temporairement et utilisez les anciennes pages.
 import NotificationsCreate from "./pages/NotificationsCreate";
-import NotificationsList from "./pages/NotificationsList";
 import ArticleCreate from "./pages/ArticleCreate";
 import ArticleListPage from "./pages/ArticleListPage";
 import ProjectCreate from "./pages/ProjectCreate";
@@ -31,11 +33,11 @@ const App = () => {
   return (
     <>
       <Routes>
-        {/* Routes publiques */}
+        {/* Public */}
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
 
-        {/* Routes privées avec Layout */}
+        {/* Privé + Layout */}
         <Route
           element={
             <PrivateRoute>
@@ -43,7 +45,7 @@ const App = () => {
             </PrivateRoute>
           }
         >
-          {/* Superadmin uniquement */}
+          {/* Superadmin only */}
           <Route
             path="/admins"
             element={
@@ -53,7 +55,7 @@ const App = () => {
             }
           />
 
-          {/* Admins connectés */}
+          {/* Admin connecté */}
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/utilisateurs" element={<Utilisateurs />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
@@ -61,18 +63,19 @@ const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />
 
-          {/* Notifications – création */}
+          {/* Notifications */}
           <Route
             path="/notifications/nouveau"
             element={
               <RequireRole role="admin">
                 <NotificationsCreate />
-                
               </RequireRole>
             }
           />
-          <Route path="/notifications" element={<NotificationsList />} />
-          {/* Articles – création + liste */}
+          {/* Alias “liste” si vous en avez un — sinon enlevez-le */}
+          {/* <Route path="/notifications" element={<NotificationsListPage />} /> */}
+
+          {/* Articles */}
           <Route
             path="/articles/nouveau"
             element={
@@ -81,9 +84,9 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/articles/liste" element={<ArticleList />} />
+          <Route path="/articles/liste" element={<ArticleListPage />} />
 
-          {/* Projets – création + liste */}
+          {/* Projets */}
           <Route
             path="/projects/nouveau"
             element={
@@ -92,7 +95,7 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/projects/liste" element={<ProjectList />} />
+          <Route path="/projects/liste" element={<ProjectListPage />} />
         </Route>
 
         {/* 404 */}

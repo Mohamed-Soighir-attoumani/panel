@@ -14,8 +14,8 @@ import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
 
-// ⚠️ Si vous avez bien créé ces nouvelles pages, laissez ces imports.
-//    Sinon, commentez-les temporairement et utilisez les anciennes pages.
+// ✅ IMPORTS NOTIFS/ARTICLES/PROJETS
+import NotificationsList from "./pages/NotificationsList";   // <-- AJOUT
 import NotificationsCreate from "./pages/NotificationsCreate";
 import ArticleCreate from "./pages/ArticleCreate";
 import ArticleListPage from "./pages/ArticleListPage";
@@ -33,11 +33,11 @@ const App = () => {
   return (
     <>
       <Routes>
-        {/* Public */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="/login" element={<LoginPage />} />
+        {/* Routes publiques */}
+        <Route path="/" element={<LoginPage />} />
+        <Route path="/login" element={<Navigate to="/" replace />} />
 
-        {/* Privé + Layout */}
+        {/* Routes privées + layout */}
         <Route
           element={
             <PrivateRoute>
@@ -45,7 +45,7 @@ const App = () => {
             </PrivateRoute>
           }
         >
-          {/* Superadmin only */}
+          {/* Superadmin */}
           <Route
             path="/admins"
             element={
@@ -55,7 +55,7 @@ const App = () => {
             }
           />
 
-          {/* Admin connecté */}
+          {/* Admins connectés */}
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/utilisateurs" element={<Utilisateurs />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
@@ -63,7 +63,15 @@ const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />
 
-          {/* Notifications */}
+          {/* ✅ Notifications */}
+          <Route
+            path="/notifications"
+            element={
+              <RequireRole role="admin">
+                <NotificationsList />
+              </RequireRole>
+            }
+          />
           <Route
             path="/notifications/nouveau"
             element={
@@ -72,12 +80,10 @@ const App = () => {
               </RequireRole>
             }
           />
-          {/* Alias “liste” si vous en avez un — sinon enlevez-le */}
-          {/* <Route path="/notifications" element={<NotificationsListPage />} /> */}
 
-          {/* Articles */}
+          {/* ✅ Articles */}
           <Route
-            path="/articles/nouveau"
+            path="/articles"
             element={
               <RequireRole role="admin">
                 <ArticleCreate />
@@ -86,9 +92,9 @@ const App = () => {
           />
           <Route path="/articles/liste" element={<ArticleListPage />} />
 
-          {/* Projets */}
+          {/* ✅ Projets */}
           <Route
-            path="/projects/nouveau"
+            path="/projects"
             element={
               <RequireRole role="admin">
                 <ProjectCreate />

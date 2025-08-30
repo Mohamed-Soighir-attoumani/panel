@@ -157,7 +157,7 @@ const Sidebar = () => {
             </li>
             {/* ℹ️ Infos (Santé & Propreté) */}
             <li className="border-t border-gray-700 pt-4">
-                            <Link
+              <Link
                 to="/infos/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -183,6 +183,18 @@ const Sidebar = () => {
 
             {/* Notifications */}
             <li className="border-t border-gray-700 pt-4">
+                            <Link
+                to="/notifications/nouveau"
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2 text-base font-medium transition ${
+                  isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                }`}
+              >
+                ➕ Nouvelle notification
+              </Link>
+            </li>
+            <li>
+            
               <Link
                 to="/notifications"
                 onClick={() => setOpen(false)}
@@ -195,32 +207,10 @@ const Sidebar = () => {
                 🔔 Liste des notifications
               </Link>
             </li>
-            <li>
-              <Link
-                to="/notifications/nouveau"
-                onClick={() => setOpen(false)}
-                className={`flex items-center gap-2 text-base font-medium transition ${
-                  isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                }`}
-              >
-                ➕ Nouvelle notification
-              </Link>
-            </li>
 
             {/* Articles */}
             <li className="border-t border-gray-700 pt-4">
-              <Link
-                to="/articles/liste"
-                onClick={() => setOpen(false)}
-                className={`flex items-center gap-2 text-base font-medium transition ${
-                  isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"
-                }`}
-              >
-                📋 Liste des articles
-              </Link>
-            </li>
-            <li>
-              <Link
+               <Link
                 to="/articles/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -233,21 +223,22 @@ const Sidebar = () => {
                 📝 Créer un article
               </Link>
             </li>
+            <li>
+            <Link
+                to="/articles/liste"
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2 text-base font-medium transition ${
+                  isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"
+                }`}
+              >
+                📋 Liste des articles
+              </Link>
+            </li>
 
             {/* Projets */}
             <li className="border-t border-gray-700 pt-4">
-              <Link
-                to="/projects/liste"
-                onClick={() => setOpen(false)}
-                className={`flex items-center gap-2 text-base font-medium transition ${
-                  isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"
-                }`}
-              >
-                📄 Liste des projets
-              </Link>
-            </li>
-            <li>
-              <Link
+
+                <Link
                 to="/projects/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -258,6 +249,18 @@ const Sidebar = () => {
                 }`}
               >
                 📁 Créer un projet
+              </Link>
+              
+            </li>
+            <li>
+              <Link
+                to="/projects/liste"
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2 text-base font-medium transition ${
+                  isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"
+                }`}
+              >
+                📄 Liste des projets
               </Link>
             </li>
           </ul>

@@ -1,3 +1,4 @@
+// src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
@@ -15,14 +16,9 @@ function buildHeaders() {
   } catch {
     me = null;
   }
-  // Admin => impose sa commune
-  if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = me.communeId;
-  }
-  // Superadmin => filtre optionnel
+  if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
   if (me?.role === "superadmin") {
-    const selectedCid =
-      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    const selectedCid = (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
     if (selectedCid) headers["x-commune-id"] = selectedCid;
   }
   return headers;
@@ -30,14 +26,11 @@ function buildHeaders() {
 
 const Sidebar = () => {
   const location = useLocation();
-
-  const [open, setOpen] = useState(false); // drawer mobile
+  const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const hasPendingIncidents = pendingCount > 0;
-
   const isActive = (path) => location.pathname.startsWith(path);
 
-  // Mémo pour limiter les rebuild d'en-têtes
   const authHeaders = useMemo(buildHeaders, [
     localStorage.getItem("token"),
     localStorage.getItem("selectedCommuneId"),
@@ -46,33 +39,20 @@ const Sidebar = () => {
 
   useEffect(() => {
     let mounted = true;
-    let intervalId;
-
-    async function fetchIncidents() {
+    const fetchIncidents = async () => {
       try {
         const res = await axios.get(`${API_URL}/api/incidents`, { headers: authHeaders });
-        const enCours = Array.isArray(res.data)
-          ? res.data.filter((i) => i.status === "En cours")
-          : [];
-        if (!mounted) return;
-        setPendingCount(enCours.length);
-      } catch {
-        // silencieux
-      }
-    }
-
-    fetchIncidents();
-    intervalId = setInterval(fetchIncidents, 5000);
-
-    return () => {
-      mounted = false;
-      clearInterval(intervalId);
+        const enCours = Array.isArray(res.data) ? res.data.filter((i) => i.status === "En cours") : [];
+        if (mounted) setPendingCount(enCours.length);
+      } catch {}
     };
+    fetchIncidents();
+    const id = setInterval(fetchIncidents, 5000);
+    return () => { mounted = false; clearInterval(id); };
   }, [authHeaders]);
 
   return (
     <>
-      {/* Bouton burger mobile */}
       <button
         type="button"
         aria-label="Ouvrir le menu"
@@ -83,37 +63,20 @@ const Sidebar = () => {
         ☰
       </button>
 
-      {/* Overlay mobile */}
-      {open && (
-        <div
-          className="fixed inset-0 bg-black/40 z-[55] md:hidden"
-          onClick={() => setOpen(false)}
-        />
-      )}
+      {open && <div className="fixed inset-0 bg-black/40 z-[55] md:hidden" onClick={() => setOpen(false)} />}
 
-      {/* Sidebar — mobile = drawer, desktop = fixe */}
       <aside
         className={[
           "bg-gray-900 text-white z-[65] flex flex-col justify-between",
           "shadow-2xl transition-transform duration-300",
-          // Desktop
           "hidden md:flex md:fixed md:top-16 md:left-0 md:h-[calc(100vh-64px)] md:w-64 md:p-4 md:pt-6",
-          // Mobile (drawer)
           "fixed top-0 left-0 h-screen w-4/5 max-w-xs p-4 pt-6 md:static md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         ].join(" ")}
       >
         <div>
-          {/* Close button mobile */}
           <div className="md:hidden flex justify-end mb-2">
-            <button
-              type="button"
-              aria-label="Fermer le menu"
-              onClick={() => setOpen(false)}
-              className="rounded-md bg-gray-800 hover:bg-gray-700 px-3 py-2"
-            >
-              ✕
-            </button>
+            <button onClick={() => setOpen(false)} className="rounded-md bg-gray-800 hover:bg-gray-700 px-3 py-2">✕</button>
           </div>
 
           <nav className="mt-2">
@@ -122,9 +85,7 @@ const Sidebar = () => {
                 <Link
                   to="/dashboard"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/dashboard") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/dashboard") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
                   🏠 Tableau de bord
                 </Link>
@@ -136,11 +97,8 @@ const Sidebar = () => {
                   onClick={() => setOpen(false)}
                   className={[
                     "flex items-center gap-2 text-base font-medium transition",
-                    hasPendingIncidents
-                      ? "text-red-500 animate-pulse font-semibold"
-                      : isActive("/incidents")
-                      ? "text-blue-400"
-                      : "hover:text-blue-300",
+                    hasPendingIncidents ? "text-red-500 animate-pulse font-semibold"
+                    : isActive("/incidents") ? "text-blue-400" : "hover:text-blue-300",
                   ].join(" ")}
                 >
                   📢 Incidents
@@ -155,16 +113,23 @@ const Sidebar = () => {
                 )}
               </li>
 
-              {/* 🔔 Notifications → créer (route existante /notifications/nouveau) */}
+              {/* 🔔 Notifications */}
+              <li>
+                <Link
+                  to="/notifications"
+                  onClick={() => setOpen(false)}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/notifications") ? "text-blue-400" : "hover:text-blue-300"}`}
+                >
+                  🔔 Liste des notifications
+                </Link>
+              </li>
               <li>
                 <Link
                   to="/notifications/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
-                  🔔 Nouvelle notification
+                  ➕ Nouvelle notification
                 </Link>
               </li>
 
@@ -173,9 +138,7 @@ const Sidebar = () => {
                 <Link
                   to="/articles/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/articles/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/articles/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
                   📝 Créer un Article
                 </Link>
@@ -184,9 +147,7 @@ const Sidebar = () => {
                 <Link
                   to="/articles/liste"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
                   📋 Liste des articles
                 </Link>
@@ -197,9 +158,7 @@ const Sidebar = () => {
                 <Link
                   to="/projects/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/projects/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/projects/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
                   📁 Créer un Projet
                 </Link>
@@ -208,9 +167,7 @@ const Sidebar = () => {
                 <Link
                   to="/projects/liste"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"}`}
                 >
                   📄 Liste des projets
                 </Link>
@@ -219,7 +176,6 @@ const Sidebar = () => {
           </nav>
         </div>
 
-        {/* Carte bas */}
         <a
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"

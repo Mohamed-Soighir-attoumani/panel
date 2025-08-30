@@ -157,6 +157,17 @@ const Sidebar = () => {
             </li>
             {/* ℹ️ Infos (Santé & Propreté) */}
             <li className="border-t border-gray-700 pt-4">
+                            <Link
+                to="/infos/nouveau"
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-2 text-base font-medium transition ${
+                  isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                }`}
+              >
+                ➕ Nouvelle info
+              </Link>
+            </li>
+            <li>
               <Link
                 to="/infos"
                 onClick={() => setOpen(false)}
@@ -167,17 +178,6 @@ const Sidebar = () => {
                 }`}
               >
                 ℹ️ Liste des infos
-              </Link>
-            </li>
-            <li>
-              <Link
-                to="/infos/nouveau"
-                onClick={() => setOpen(false)}
-                className={`flex items-center gap-2 text-base font-medium transition ${
-                  isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                }`}
-              >
-                ➕ Nouvelle info
               </Link>
             </li>
 

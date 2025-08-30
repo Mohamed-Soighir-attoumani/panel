@@ -1,30 +1,39 @@
 import React from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, Link, useNavigate } from "react-router-dom";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 
 /**
- * Layout simple :
+ * Layout :
  * - Header fixé en haut (64px = h-16)
- * - Sidebar fixe à gauche (w-64) sous le header
- * - Contenu avec padding-top/margin-left correspondant
- *   (sur mobile, la sidebar étant fixe, le contenu reste visible sous le header)
+ * - Sidebar fixe à gauche sous le header (w-64)
+ * - Contenu avec padding-top/marge-gauche pour ne rien masquer
  */
 const Layout = () => {
+  const navigate = useNavigate();
+
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("token_orig");
+    localStorage.removeItem("me");
+    navigate("/login", { replace: true });
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
+      {/* Header fixe */}
       <div className="fixed top-0 left-0 right-0 z-40">
         <Header />
       </div>
 
-      {/* Sidebar (fixe sous le header) */}
+      {/* Sidebar (fixe sous le header, responsive dans <Sidebar/>) */}
       <Sidebar />
 
-      {/* Zone de contenu : padding pour ne pas passer sous le header
-          et marge gauche pour ne pas passer sous la sidebar sur écrans >= md */}
+      {/* Zone de contenu : pt-16 pour libérer le header, md:ml-64 pour libérer la sidebar */}
       <main className="pt-16 md:ml-64">
-        <Outlet />
+        <div className="p-4">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

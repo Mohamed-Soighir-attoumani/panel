@@ -20,22 +20,29 @@ const RequireRole = ({ role = "admin", children }) => {
     } finally {
       setReady(true);
     }
+
+    // Sync si le storage change ailleurs (impersonation, logout, etc.)
+    const onStorage = (e) => {
+      if (e.key === "me") {
+        try {
+          setMe(e.newValue ? JSON.parse(e.newValue) : null);
+        } catch {
+          setMe(null);
+        }
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   if (!ready) {
-    return (
-      <div className="p-6 text-gray-600">
-        Chargement…
-      </div>
-    );
+    return <div className="p-6 text-gray-600">Chargement…</div>;
   }
 
   const required = RANK[role] ?? RANK.admin;
   const have = RANK[me?.role] ?? 0;
 
-  if (have >= required) {
-    return children;
-  }
+  if (have >= required) return children;
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center">

@@ -164,7 +164,7 @@ const Sidebar = () => {
                   isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
                 }`}
               >
-                ➕ Nouvelle info : Santé & Propreté
+                ➕ Santé & Propreté
               </Link>
             </li>
             <li>

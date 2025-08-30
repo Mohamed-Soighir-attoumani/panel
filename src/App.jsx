@@ -14,10 +14,11 @@ import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
 import NotificationsCreate from "./pages/NotificationsCreate";
+import NotificationsList from "./pages/NotificationsList";
 import ArticleCreate from "./pages/ArticleCreate";
-import ArticleListPage from "./pages/ArticleListPage";
+import ArticleListPage from "./pages/ArticleList";
 import ProjectCreate from "./pages/ProjectCreate";
-import ProjectListPage from "./pages/ProjectListPage";
+import ProjectListPage from "./pages/ProjectList";
 
 // Layout
 import Layout from "./components/Layout";
@@ -66,10 +67,11 @@ const App = () => {
             element={
               <RequireRole role="admin">
                 <NotificationsCreate />
+                
               </RequireRole>
             }
           />
-
+          <Route path="/notifications" element={<NotificationsList />} />
           {/* Articles – création + liste */}
           <Route
             path="/articles/nouveau"
@@ -79,7 +81,7 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/articles/liste" element={<ArticleListPage />} />
+          <Route path="/articles/liste" element={<ArticleList />} />
 
           {/* Projets – création + liste */}
           <Route
@@ -90,7 +92,7 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/projects/liste" element={<ProjectListPage />} />
+          <Route path="/projects/liste" element={<ProjectList />} />
         </Route>
 
         {/* 404 */}

@@ -1,10 +1,19 @@
-// src/routes/PrivateRoute.jsx
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 
-export default function PrivateRoute({ children }) {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-  const loc = useLocation();
-  if (!token) return <Navigate to="/login" replace state={{ from: loc }} />;
+/**
+ * Protège les routes privées :
+ * - exige un token en localStorage
+ * - sinon redirige vers /login en conservant la destination
+ */
+const PrivateRoute = ({ children }) => {
+  const location = useLocation();
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+
+  if (!token) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
   return children;
-}
+};
+
+export default PrivateRoute;

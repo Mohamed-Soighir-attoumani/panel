@@ -1,24 +1,16 @@
+// src/components/Layout.jsx
 import React from "react";
-import { Outlet, Link, useNavigate } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 
 /**
- * Layout :
+ * Layout:
  * - Header fixé en haut (64px = h-16)
- * - Sidebar fixe à gauche sous le header (w-64)
- * - Contenu avec padding-top/marge-gauche pour ne rien masquer
+ * - Sous le header, on a une grille (md) : [sidebar 16rem | contenu]
+ * - Toute la page a une SEULE scroll bar (pas de scroll interne à la sidebar)
  */
 const Layout = () => {
-  const navigate = useNavigate();
-
-  const logout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("token_orig");
-    localStorage.removeItem("me");
-    navigate("/login", { replace: true });
-  };
-
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Header fixe */}
@@ -26,15 +18,19 @@ const Layout = () => {
         <Header />
       </div>
 
-      {/* Sidebar (fixe sous le header, responsive dans <Sidebar/>) */}
-      <Sidebar />
+      {/* Conteneur sous header */}
+      <div className="pt-16">
+        {/* Grille à partir de md : sidebar + contenu */}
+        <div className="md:grid md:grid-cols-[16rem,1fr] md:gap-0">
+          {/* Colonne gauche : sidebar statique (défile avec la page) */}
+          <Sidebar />
 
-      {/* Zone de contenu : pt-16 pour libérer le header, md:ml-64 pour libérer la sidebar */}
-      <main className="pt-16 md:ml-64">
-        <div className="p-4">
-          <Outlet />
+          {/* Colonne droite : contenu */}
+          <main>
+            <Outlet />
+          </main>
         </div>
-      </main>
+      </div>
     </div>
   );
 };

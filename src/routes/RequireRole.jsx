@@ -1,36 +1,53 @@
-// src/routes/RequireRole.jsx
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import { Navigate } from "react-router-dom";
-import { API_URL } from "../config";
 
-export default function RequireRole({ role = "admin", children }) {
+/**
+ * Affiche les enfants si le rôle de l'utilisateur suffit.
+ * On lit `me` depuis localStorage (déjà mis à jour par /api/me sur les pages).
+ * Rangs : user=1, admin=2, superadmin=3
+ */
+const RANK = { user: 1, admin: 2, superadmin: 3 };
+
+const RequireRole = ({ role = "admin", children }) => {
   const [me, setMe] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${API_URL}/api/me`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        setMe(res.data?.user || null);
-      } catch {
-        setMe(null);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    try {
+      const raw = localStorage.getItem("me");
+      setMe(raw ? JSON.parse(raw) : null);
+    } catch {
+      setMe(null);
+    } finally {
+      setReady(true);
+    }
   }, []);
 
-  if (loading) return <div className="p-6">Chargement…</div>;
-  if (!me) return <Navigate to="/login" replace />;
-
-  const rank = { user: 1, admin: 2, superadmin: 3 };
-  if ((rank[me.role] || 0) < (rank[role] || 0)) {
-    return <div className="p-6 text-red-600">Accès interdit.</div>;
+  if (!ready) {
+    return (
+      <div className="p-6 text-gray-600">
+        Chargement…
+      </div>
+    );
   }
 
-  return children;
-}
+  const required = RANK[role] ?? RANK.admin;
+  const have = RANK[me?.role] ?? 0;
+
+  if (have >= required) {
+    return children;
+  }
+
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center">
+      <div className="max-w-md w-full bg-white shadow-md rounded-lg p-6 text-center">
+        <h2 className="text-xl font-semibold text-gray-800 mb-2">Accès restreint</h2>
+        <p className="text-gray-600">
+          Cette page est réservée aux utilisateurs avec le rôle&nbsp;
+          <strong>{role}</strong>.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default RequireRole;

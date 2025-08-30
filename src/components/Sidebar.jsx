@@ -130,7 +130,31 @@ const Sidebar = () => {
                 🏠 Tableau de bord
               </Link>
             </li>
-
+                          {/* Incidents */}
+            <li className="border-t border-gray-700 pt-4 relative">
+              <Link
+                to="/incidents"
+                onClick={() => setOpen(false)}
+                className={[
+                  "flex items-center gap-2 text-base font-medium transition",
+                  hasPendingIncidents
+                    ? "text-red-500 animate-pulse font-semibold"
+                    : isActive("/incidents")
+                    ? "text-blue-400"
+                    : "hover:text-blue-300",
+                ].join(" ")}
+              >
+                📢 Incidents
+                {hasPendingIncidents && (
+                  <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs w-5 h-5 animate-bounce">
+                    {pendingCount}
+                  </span>
+                )}
+              </Link>
+              {hasPendingIncidents && (
+                <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
+              )}
+            </li>
             {/* ℹ️ Infos (Santé & Propreté) */}
             <li className="border-t border-gray-700 pt-4">
               <Link
@@ -155,32 +179,6 @@ const Sidebar = () => {
               >
                 ➕ Nouvelle info
               </Link>
-            </li>
-
-            {/* Incidents */}
-            <li className="border-t border-gray-700 pt-4 relative">
-              <Link
-                to="/incidents"
-                onClick={() => setOpen(false)}
-                className={[
-                  "flex items-center gap-2 text-base font-medium transition",
-                  hasPendingIncidents
-                    ? "text-red-500 animate-pulse font-semibold"
-                    : isActive("/incidents")
-                    ? "text-blue-400"
-                    : "hover:text-blue-300",
-                ].join(" ")}
-              >
-                📢 Incidents
-                {hasPendingIncidents && (
-                  <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs w-5 h-5 animate-bounce">
-                    {pendingCount}
-                  </span>
-                )}
-              </Link>
-              {hasPendingIncidents && (
-                <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
-              )}
             </li>
 
             {/* Notifications */}

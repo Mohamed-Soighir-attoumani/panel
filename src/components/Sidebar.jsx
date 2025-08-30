@@ -18,7 +18,8 @@ function buildHeaders() {
   }
   if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
   if (me?.role === "superadmin") {
-    const selectedCid = (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    const selectedCid =
+      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
     if (selectedCid) headers["x-commune-id"] = selectedCid;
   }
   return headers;
@@ -26,11 +27,13 @@ function buildHeaders() {
 
 const Sidebar = () => {
   const location = useLocation();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false); // drawer mobile
   const [pendingCount, setPendingCount] = useState(0);
   const hasPendingIncidents = pendingCount > 0;
+
   const isActive = (path) => location.pathname.startsWith(path);
 
+  // Mémo pour éviter de rebâtir les headers à chaque render
   const authHeaders = useMemo(buildHeaders, [
     localStorage.getItem("token"),
     localStorage.getItem("selectedCommuneId"),
@@ -39,20 +42,33 @@ const Sidebar = () => {
 
   useEffect(() => {
     let mounted = true;
-    const fetchIncidents = async () => {
+    let intervalId;
+
+    async function fetchIncidents() {
       try {
         const res = await axios.get(`${API_URL}/api/incidents`, { headers: authHeaders });
-        const enCours = Array.isArray(res.data) ? res.data.filter((i) => i.status === "En cours") : [];
-        if (mounted) setPendingCount(enCours.length);
-      } catch {}
-    };
+        const enCours = Array.isArray(res.data)
+          ? res.data.filter((i) => i.status === "En cours")
+          : [];
+        if (!mounted) return;
+        setPendingCount(enCours.length);
+      } catch {
+        // silencieux
+      }
+    }
+
     fetchIncidents();
-    const id = setInterval(fetchIncidents, 5000);
-    return () => { mounted = false; clearInterval(id); };
+    intervalId = setInterval(fetchIncidents, 5000);
+
+    return () => {
+      mounted = false;
+      clearInterval(intervalId);
+    };
   }, [authHeaders]);
 
   return (
     <>
+      {/* Bouton burger mobile */}
       <button
         type="button"
         aria-label="Ouvrir le menu"
@@ -63,20 +79,41 @@ const Sidebar = () => {
         ☰
       </button>
 
-      {open && <div className="fixed inset-0 bg-black/40 z-[55] md:hidden" onClick={() => setOpen(false)} />}
+      {/* Overlay mobile */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[55] md:hidden"
+          onClick={() => setOpen(false)}
+        />
+      )}
 
+      {/* Sidebar — mobile = drawer, desktop = fixe */}
       <aside
         className={[
-          "bg-gray-900 text-white z-[65] flex flex-col justify-between",
+          "bg-gray-900 text-white z-[65] flex flex-col", // <- colonne
           "shadow-2xl transition-transform duration-300",
+          // Desktop: hauteur sous header (64px), largeur fixe
           "hidden md:flex md:fixed md:top-16 md:left-0 md:h-[calc(100vh-64px)] md:w-64 md:p-4 md:pt-6",
+          // Mobile (drawer pleine hauteur)
           "fixed top-0 left-0 h-screen w-4/5 max-w-xs p-4 pt-6 md:static md:translate-x-0",
+          // IMPORTANT pour le scroll interne : on masque l’overflow du conteneur,
+          // et on fera scroller la zone centrale (flex-1) :
+          "overflow-hidden",
           open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         ].join(" ")}
       >
-        <div>
+        {/* Zone centrale SCROLLABLE */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y pr-1 md:pr-2">
+          {/* Close button mobile */}
           <div className="md:hidden flex justify-end mb-2">
-            <button onClick={() => setOpen(false)} className="rounded-md bg-gray-800 hover:bg-gray-700 px-3 py-2">✕</button>
+            <button
+              type="button"
+              aria-label="Fermer le menu"
+              onClick={() => setOpen(false)}
+              className="rounded-md bg-gray-800 hover:bg-gray-700 px-3 py-2"
+            >
+              ✕
+            </button>
           </div>
 
           <nav className="mt-2">
@@ -85,7 +122,9 @@ const Sidebar = () => {
                 <Link
                   to="/dashboard"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/dashboard") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/dashboard") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   🏠 Tableau de bord
                 </Link>
@@ -97,8 +136,11 @@ const Sidebar = () => {
                   onClick={() => setOpen(false)}
                   className={[
                     "flex items-center gap-2 text-base font-medium transition",
-                    hasPendingIncidents ? "text-red-500 animate-pulse font-semibold"
-                    : isActive("/incidents") ? "text-blue-400" : "hover:text-blue-300",
+                    hasPendingIncidents
+                      ? "text-red-500 animate-pulse font-semibold"
+                      : isActive("/incidents")
+                      ? "text-blue-400"
+                      : "hover:text-blue-300",
                   ].join(" ")}
                 >
                   📢 Incidents
@@ -108,6 +150,7 @@ const Sidebar = () => {
                     </span>
                   )}
                 </Link>
+
                 {hasPendingIncidents && (
                   <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
                 )}
@@ -118,7 +161,9 @@ const Sidebar = () => {
                 <Link
                   to="/notifications"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/notifications") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/notifications") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   🔔 Liste des notifications
                 </Link>
@@ -127,7 +172,9 @@ const Sidebar = () => {
                 <Link
                   to="/notifications/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   ➕ Nouvelle notification
                 </Link>
@@ -138,7 +185,9 @@ const Sidebar = () => {
                 <Link
                   to="/articles/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/articles/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/articles/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   📝 Créer un Article
                 </Link>
@@ -147,7 +196,9 @@ const Sidebar = () => {
                 <Link
                   to="/articles/liste"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/articles/liste") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   📋 Liste des articles
                 </Link>
@@ -158,7 +209,9 @@ const Sidebar = () => {
                 <Link
                   to="/projects/nouveau"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/projects/nouveau") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/projects/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   📁 Créer un Projet
                 </Link>
@@ -167,40 +220,42 @@ const Sidebar = () => {
                 <Link
                   to="/projects/liste"
                   onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"}`}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/projects/liste") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
                 >
                   📄 Liste des projets
                 </Link>
               </li>
-              {/* 🩺 Santé & Propreté */}
-<li className="border-t border-gray-700 pt-4">
-  <Link
-    to="/infos"
-    onClick={() => setOpen(false)}
-    className={`flex items-center gap-2 text-base font-medium transition ${
-      isActive("/infos") ? "text-blue-400" : "hover:text-blue-300"
-    }`}
-  >
-    🩺 Santé & Propreté (liste)
-  </Link>
-</li>
-<li>
-  <Link
-    to="/infos/nouveau"
-    onClick={() => setOpen(false)}
-    className={`flex items-center gap-2 text-base font-medium transition ${
-      isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-    }`}
-  >
-    ➕ Nouvelle info
-  </Link>
-</li>
 
-              
+              {/* 🩺 Santé & Propreté (si tu l’as ajouté) */}
+              {/* <li className="border-t border-gray-700 pt-4">
+                <Link
+                  to="/infos"
+                  onClick={() => setOpen(false)}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/infos") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
+                >
+                  🩺 Santé & Propreté (liste)
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/infos/nouveau"
+                  onClick={() => setOpen(false)}
+                  className={`flex items-center gap-2 text-base font-medium transition ${
+                    isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+                  }`}
+                >
+                  ➕ Nouvelle info
+                </Link>
+              </li> */}
             </ul>
           </nav>
         </div>
 
+        {/* Pied (reste visible, le contenu au-dessus défile) */}
         <a
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"

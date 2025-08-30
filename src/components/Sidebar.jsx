@@ -33,7 +33,6 @@ const Sidebar = () => {
 
   const isActive = (path) => location.pathname.startsWith(path);
 
-  // Mémo pour éviter de rebâtir les headers à chaque render
   const authHeaders = useMemo(buildHeaders, [
     localStorage.getItem("token"),
     localStorage.getItem("selectedCommuneId"),
@@ -87,23 +86,21 @@ const Sidebar = () => {
         />
       )}
 
-      {/* Sidebar — mobile = drawer, desktop = fixe */}
+      {/* Un SEUL composant :
+          - mobile: drawer (position: fixed)
+          - desktop: bloc statique dans la grille (pas de position fixed/sticky) */}
       <aside
         className={[
-          "bg-gray-900 text-white z-[65] flex flex-col", // <- colonne
-          "shadow-2xl transition-transform duration-300",
-          // Desktop: hauteur sous header (64px), largeur fixe
-          "hidden md:flex md:fixed md:top-16 md:left-0 md:h-[calc(100vh-64px)] md:w-64 md:p-4 md:pt-6",
-          // Mobile (drawer pleine hauteur)
-          "fixed top-0 left-0 h-screen w-4/5 max-w-xs p-4 pt-6 md:static md:translate-x-0",
-          // IMPORTANT pour le scroll interne : on masque l’overflow du conteneur,
-          // et on fera scroller la zone centrale (flex-1) :
-          "overflow-hidden",
+          "bg-gray-900 text-white flex flex-col shadow-2xl transition-transform duration-300",
+          // Mobile = drawer
+          "fixed md:static top-0 left-0 h-screen md:h-auto w-4/5 md:w-auto max-w-xs md:max-w-none p-4 pt-6 z-[65]",
           open ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          // Desktop: visible, largeur gérée par la grille parente (16rem)
+          "hidden md:flex",
         ].join(" ")}
       >
-        {/* Zone centrale SCROLLABLE */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y pr-1 md:pr-2">
+        {/* CONTENU SIDEBAR */}
+        <div className="flex-1">
           {/* Close button mobile */}
           <div className="md:hidden flex justify-end mb-2">
             <button
@@ -150,7 +147,6 @@ const Sidebar = () => {
                     </span>
                   )}
                 </Link>
-
                 {hasPendingIncidents && (
                   <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
                 )}
@@ -227,35 +223,11 @@ const Sidebar = () => {
                   📄 Liste des projets
                 </Link>
               </li>
-
-              {/* 🩺 Santé & Propreté (si tu l’as ajouté) */}
-              {/* <li className="border-t border-gray-700 pt-4">
-                <Link
-                  to="/infos"
-                  onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/infos") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
-                >
-                  🩺 Santé & Propreté (liste)
-                </Link>
-              </li>
-              <li>
-                <Link
-                  to="/infos/nouveau"
-                  onClick={() => setOpen(false)}
-                  className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
-                  }`}
-                >
-                  ➕ Nouvelle info
-                </Link>
-              </li> */}
             </ul>
           </nav>
         </div>
 
-        {/* Pied (reste visible, le contenu au-dessus défile) */}
+        {/* Pied (reste en bas de la sidebar) */}
         <a
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"

@@ -19,7 +19,7 @@ function buildHeaders() {
   if (me?.role === "admin" && me?.communeId) {
     headers["x-commune-id"] = me.communeId;
   }
-  // Superadmin => applique filtre s'il existe (sinon voit tout)
+  // Superadmin => filtre optionnel
   if (me?.role === "superadmin") {
     const selectedCid =
       (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
@@ -37,9 +37,8 @@ const Sidebar = () => {
 
   const isActive = (path) => location.pathname.startsWith(path);
 
-  // Mémo pour éviter de rebâtir les headers à chaque render
+  // Mémo pour limiter les rebuild d'en-têtes
   const authHeaders = useMemo(buildHeaders, [
-    // on « dépend » des clés LS : quand tu changes de commune/token ailleurs, re-render
     localStorage.getItem("token"),
     localStorage.getItem("selectedCommuneId"),
     localStorage.getItem("me"),
@@ -57,8 +56,8 @@ const Sidebar = () => {
           : [];
         if (!mounted) return;
         setPendingCount(enCours.length);
-      } catch (error) {
-        // Silencieux pour ne pas spammer la console
+      } catch {
+        // silencieux
       }
     }
 
@@ -145,46 +144,42 @@ const Sidebar = () => {
                   ].join(" ")}
                 >
                   📢 Incidents
-                  {/* Badge compteur (si > 0) */}
                   {hasPendingIncidents && (
                     <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs w-5 h-5 animate-bounce">
                       {pendingCount}
                     </span>
                   )}
                 </Link>
-
-                {/* Pastille en haut à droite pour attirer l’œil */}
                 {hasPendingIncidents && (
                   <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
                 )}
               </li>
 
+              {/* 🔔 Notifications → créer (route existante /notifications/nouveau) */}
               <li>
                 <Link
-                  to="/notifications"
+                  to="/notifications/nouveau"
                   onClick={() => setOpen(false)}
                   className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/notifications") ? "text-blue-400" : "hover:text-blue-300"
+                    isActive("/notifications/nouveau") ? "text-blue-400" : "hover:text-blue-300"
                   }`}
                 >
-                  🔔 Notifications
+                  🔔 Nouvelle notification
                 </Link>
               </li>
 
+              {/* 📝 Articles */}
               <li className="border-t border-gray-700 pt-4">
                 <Link
-                  to="/articles"
+                  to="/articles/nouveau"
                   onClick={() => setOpen(false)}
                   className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/articles") && !isActive("/articles/liste")
-                      ? "text-blue-400"
-                      : "hover:text-blue-300"
+                    isActive("/articles/nouveau") ? "text-blue-400" : "hover:text-blue-300"
                   }`}
                 >
                   📝 Créer un Article
                 </Link>
               </li>
-
               <li>
                 <Link
                   to="/articles/liste"
@@ -197,20 +192,18 @@ const Sidebar = () => {
                 </Link>
               </li>
 
+              {/* 📁 Projets */}
               <li className="border-t border-gray-700 pt-4">
                 <Link
-                  to="/projects"
+                  to="/projects/nouveau"
                   onClick={() => setOpen(false)}
                   className={`flex items-center gap-2 text-base font-medium transition ${
-                    isActive("/projects") && !isActive("/projects/liste")
-                      ? "text-blue-400"
-                      : "hover:text-blue-300"
+                    isActive("/projects/nouveau") ? "text-blue-400" : "hover:text-blue-300"
                   }`}
                 >
                   📁 Créer un Projet
                 </Link>
               </li>
-
               <li>
                 <Link
                   to="/projects/liste"
@@ -226,7 +219,7 @@ const Sidebar = () => {
           </nav>
         </div>
 
-        {/* Carte de crédit bas */}
+        {/* Carte bas */}
         <a
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"

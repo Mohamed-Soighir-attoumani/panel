@@ -7,16 +7,16 @@ import "react-toastify/dist/ReactToastify.css";
 // Pages
 import LoginPage from "./pages/LoginPage";
 import SuperadminAdmins from "./pages/SuperadminAdmins";
-import Utilisateurs from './pages/utilisateurs.jsx';
+import Utilisateurs from "./pages/utilisateurs.jsx";
 import AdminProfile from "./pages/AdminProfile";
 import ChangerPhoto from "./pages/ChangerPhoto";
 import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
-import NotificationPage from "./pages/NotificationPage";
-import ArticlePage from "./pages/ArticlePage";
+import NotificationsCreate from "./pages/NotificationsCreate";
+import ArticleCreate from "./pages/ArticleCreate";
 import ArticleListPage from "./pages/ArticleListPage";
-import ProjectPage from "./pages/ProjectPage";
+import ProjectCreate from "./pages/ProjectCreate";
 import ProjectListPage from "./pages/ProjectListPage";
 
 // Layout
@@ -42,7 +42,7 @@ const App = () => {
             </PrivateRoute>
           }
         >
-          {/* Page superadmin uniquement */}
+          {/* Superadmin uniquement */}
           <Route
             path="/admins"
             element={
@@ -52,28 +52,51 @@ const App = () => {
             }
           />
 
-          {/* Pages accessibles à tout admin connecté */}
+          {/* Admins connectés */}
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/utilisateurs" element={<Utilisateurs />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
           <Route path="/changer-mot-de-passe" element={<ChangerMotDePasse />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />
-          <Route path="/notifications" element={<NotificationPage />} />
-          <Route path="/articles" element={<ArticlePage />} />
+
+          {/* Notifications – création */}
+          <Route
+            path="/notifications/nouveau"
+            element={
+              <RequireRole role="admin">
+                <NotificationsCreate />
+              </RequireRole>
+            }
+          />
+
+          {/* Articles – création + liste */}
+          <Route
+            path="/articles/nouveau"
+            element={
+              <RequireRole role="admin">
+                <ArticleCreate />
+              </RequireRole>
+            }
+          />
           <Route path="/articles/liste" element={<ArticleListPage />} />
-          <Route path="/projects" element={<ProjectPage />} />
+
+          {/* Projets – création + liste */}
+          <Route
+            path="/projects/nouveau"
+            element={
+              <RequireRole role="admin">
+                <ProjectCreate />
+              </RequireRole>
+            }
+          />
           <Route path="/projects/liste" element={<ProjectListPage />} />
         </Route>
 
         {/* 404 */}
-        <Route
-          path="*"
-          element={<div style={{ padding: "2rem" }}>Page introuvable</div>}
-        />
+        <Route path="*" element={<div style={{ padding: "2rem" }}>Page introuvable</div>} />
       </Routes>
 
-      {/* ✅ Notifications toast */}
       <ToastContainer />
     </>
   );

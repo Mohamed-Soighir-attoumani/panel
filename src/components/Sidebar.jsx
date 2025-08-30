@@ -172,6 +172,31 @@ const Sidebar = () => {
                   📄 Liste des projets
                 </Link>
               </li>
+              {/* 🩺 Santé & Propreté */}
+<li className="border-t border-gray-700 pt-4">
+  <Link
+    to="/infos"
+    onClick={() => setOpen(false)}
+    className={`flex items-center gap-2 text-base font-medium transition ${
+      isActive("/infos") ? "text-blue-400" : "hover:text-blue-300"
+    }`}
+  >
+    🩺 Santé & Propreté (liste)
+  </Link>
+</li>
+<li>
+  <Link
+    to="/infos/nouveau"
+    onClick={() => setOpen(false)}
+    className={`flex items-center gap-2 text-base font-medium transition ${
+      isActive("/infos/nouveau") ? "text-blue-400" : "hover:text-blue-300"
+    }`}
+  >
+    ➕ Nouvelle info
+  </Link>
+</li>
+
+              
             </ul>
           </nav>
         </div>

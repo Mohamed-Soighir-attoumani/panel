@@ -1,45 +1,35 @@
 // src/routes/RequireRole.jsx
-import React from "react";
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import { Navigate } from "react-router-dom";
+import { API_URL } from "../config";
 
-/**
- * Affiche children uniquement si le rôle courant === role (ex: "superadmin").
- * Le rôle est lu depuis le JWT (token) puis fallback sur le cache "admin" du localStorage.
- */
-function getRoleFromToken() {
-  try {
-    const t = localStorage.getItem("token");
-    if (!t) return null;
-    const payload = JSON.parse(atob(t.split(".")[1] || ""));
-    return payload?.role || null;
-  } catch {
-    return null;
-  }
-}
+export default function RequireRole({ role = "admin", children }) {
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-export default function RequireRole({ role, children }) {
-  const jwtRole = getRoleFromToken();
-  const cachedRole = (() => {
-    try {
-      const raw = localStorage.getItem("admin");
-      return raw ? JSON.parse(raw).role : null;
-    } catch {
-      return null;
-    }
-  })();
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem("token") || "";
+        const res = await axios.get(`${API_URL}/api/me`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        setMe(res.data?.user || null);
+      } catch {
+        setMe(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
 
-  const effectiveRole = jwtRole || cachedRole;
+  if (loading) return <div className="p-6">Chargement…</div>;
+  if (!me) return <Navigate to="/login" replace />;
 
-  if (effectiveRole !== role) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white shadow-md rounded-lg p-6 text-center">
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Accès restreint</h2>
-          <p className="text-gray-600">
-            Cette page est réservée au <strong>{role}</strong>.
-          </p>
-        </div>
-      </div>
-    );
+  const rank = { user: 1, admin: 2, superadmin: 3 };
+  if ((rank[me.role] || 0) < (rank[role] || 0)) {
+    return <div className="p-6 text-red-600">Accès interdit.</div>;
   }
 
   return children;

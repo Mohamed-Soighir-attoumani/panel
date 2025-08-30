@@ -21,6 +21,8 @@ import ArticleCreate from "./pages/ArticleCreate";
 import ArticleListPage from "./pages/ArticleListPage";
 import ProjectCreate from "./pages/ProjectCreate";
 import ProjectListPage from "./pages/ProjectListPage";
+import InfosList from "./pages/InfosList";
+import InfosCreate from "./pages/InfosCreate";
 
 // Layout
 import Layout from "./components/Layout";
@@ -103,6 +105,23 @@ const App = () => {
             }
           />
 
+          {/* Santé & Propreté */}
+          <Route
+            path="/infos"
+            element={
+        <RequireRole role="admin">
+        <InfosList />
+        </RequireRole>
+          }
+          />
+        <Route
+          path="/infos/nouveau"
+          element={
+          <RequireRole role="admin">
+          <InfosCreate />
+        </RequireRole>
+          }
+        />          
           {/* Projets */}
           {/* Liste */}
           <Route path="/projects/liste" element={<ProjectListPage />} />

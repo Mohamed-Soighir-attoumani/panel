@@ -14,8 +14,8 @@ import ChangerMotDePasse from "./pages/ChangerMotDePasse";
 import DashboardPage from "./pages/DashboardPage";
 import IncidentPage from "./pages/IncidentPage";
 
-// ✅ IMPORTS NOTIFS/ARTICLES/PROJETS
-import NotificationsList from "./pages/NotificationsList";   // <-- AJOUT
+// Notifications / Articles / Projets
+import NotificationsList from "./pages/NotificationsList";
 import NotificationsCreate from "./pages/NotificationsCreate";
 import ArticleCreate from "./pages/ArticleCreate";
 import ArticleListPage from "./pages/ArticleListPage";
@@ -35,9 +35,10 @@ const App = () => {
       <Routes>
         {/* Routes publiques */}
         <Route path="/" element={<LoginPage />} />
+        {/* Permettre les anciens liens /login => rediriger vers / */}
         <Route path="/login" element={<Navigate to="/" replace />} />
 
-        {/* Routes privées + layout */}
+        {/* Routes privées avec Layout */}
         <Route
           element={
             <PrivateRoute>
@@ -45,7 +46,7 @@ const App = () => {
             </PrivateRoute>
           }
         >
-          {/* Superadmin */}
+          {/* Page superadmin uniquement */}
           <Route
             path="/admins"
             element={
@@ -55,7 +56,7 @@ const App = () => {
             }
           />
 
-          {/* Admins connectés */}
+          {/* Pages accessibles à tout admin connecté */}
           <Route path="/profil" element={<AdminProfile />} />
           <Route path="/utilisateurs" element={<Utilisateurs />} />
           <Route path="/changer-photo" element={<ChangerPhoto />} />
@@ -63,7 +64,7 @@ const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />
 
-          {/* ✅ Notifications */}
+          {/* Notifications */}
           <Route
             path="/notifications"
             element={
@@ -81,7 +82,10 @@ const App = () => {
             }
           />
 
-          {/* ✅ Articles */}
+          {/* Articles */}
+          {/* Liste */}
+          <Route path="/articles/liste" element={<ArticleListPage />} />
+          {/* Création (deux chemins supportés) */}
           <Route
             path="/articles"
             element={
@@ -90,9 +94,19 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/articles/liste" element={<ArticleListPage />} />
+          <Route
+            path="/articles/nouveau"
+            element={
+              <RequireRole role="admin">
+                <ArticleCreate />
+              </RequireRole>
+            }
+          />
 
-          {/* ✅ Projets */}
+          {/* Projets */}
+          {/* Liste */}
+          <Route path="/projects/liste" element={<ProjectListPage />} />
+          {/* Création (deux chemins supportés) */}
           <Route
             path="/projects"
             element={
@@ -101,13 +115,24 @@ const App = () => {
               </RequireRole>
             }
           />
-          <Route path="/projects/liste" element={<ProjectListPage />} />
+          <Route
+            path="/projects/nouveau"
+            element={
+              <RequireRole role="admin">
+                <ProjectCreate />
+              </RequireRole>
+            }
+          />
         </Route>
 
         {/* 404 */}
-        <Route path="*" element={<div style={{ padding: "2rem" }}>Page introuvable</div>} />
+        <Route
+          path="*"
+          element={<div style={{ padding: "2rem" }}>Page introuvable</div>}
+        />
       </Routes>
 
+      {/* Toasts globaux */}
       <ToastContainer />
     </>
   );

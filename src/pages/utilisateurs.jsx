@@ -31,28 +31,27 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
 
-const PAGE_SIZE = 15;
-
-/** Extraction d'ObjectId vers string (gère $oid, objets, etc.) */
-const objIdToString = (v) => {
-  if (!v) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "object") {
-    if (v.$oid) return v.$oid;
-    if (typeof v.toHexString === "function") return v.toHexString();
-    if (typeof v.toString === "function") {
-      const s = v.toString();
+/* Convertit n’importe quel _id en string exploitable */
+const idFromAny = (u) => {
+  if (!u) return "";
+  if (u._idString) return String(u._idString);
+  const raw = u._id;
+  if (!raw) return String(u.id || u.userId || u.email || "");
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object") {
+    if (raw.$oid) return String(raw.$oid);
+    if (typeof raw.toHexString === "function") return raw.toHexString();
+    if (typeof raw.toString === "function") {
+      const s = raw.toString();
       const m = s.match(/[a-f0-9]{24}/i);
       if (m) return m[0];
       return s;
     }
   }
-  return "";
+  return String(u.id || u.userId || u.email || "");
 };
 
-/** ID canonique, priorité à _idString renvoyé par l'API */
-const getId = (u) =>
-  (u && (u._idString || objIdToString(u._id) || u.id || u.userId || u.email || "")).toString();
+const PAGE_SIZE = 15;
 
 /* Small pill */
 const Pill = ({ ok, children, title }) => (
@@ -185,7 +184,7 @@ export default function Utilisateurs() {
         throw new Error(r.data?.message || "Plans indisponibles");
       safeSet(setPlans)(Array.isArray(r.data?.plans) ? r.data.plans : []);
     } catch {
-      // fallback plans si l'API n'existe pas encore
+      // fallback plans
       safeSet(setPlans)([
         { id: "basic", name: "Basic", price: 9.9, currency: "EUR", period: "mois" },
         { id: "pro", name: "Pro", price: 19.9, currency: "EUR", period: "mois" },
@@ -214,7 +213,7 @@ export default function Utilisateurs() {
         communeId: communeId || undefined,
         status: statusFilter || undefined,
         sub: subFilter || undefined,
-        role: "admin", // on force côté API
+        role: "admin",
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -222,7 +221,7 @@ export default function Utilisateurs() {
       let list = [];
       let hasMore = false;
 
-      // 1) route dédiée si dispo
+      // 1) on tente /api/admins (si une autre route répond), sinon fallback /api/users
       const r1 = await axios.get(`${API_URL}/api/admins`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
@@ -241,15 +240,14 @@ export default function Utilisateurs() {
             ? r1.data
             : [];
 
-        // ✅ normalise l'ID pour le front
+        // Normalise ID
         list = items.map((u) => ({
           ...u,
-          _idString: u._idString || objIdToString(u._id),
+          _idString: u._idString ? String(u._idString) : undefined,
         }));
         const total = Number(r1.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
-        // 2) fallback -> /api/users
         const r2 = await axios.get(`${API_URL}/api/users`, {
           headers: { Authorization: `Bearer ${token}` },
           params,
@@ -267,10 +265,9 @@ export default function Utilisateurs() {
             : Array.isArray(r2.data)
             ? r2.data
             : [];
-
         list = items.map((u) => ({
           ...u,
-          _idString: u._idString || objIdToString(u._id),
+          _idString: u._idString ? String(u._idString) : undefined,
         }));
         const total = Number(r2.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
@@ -311,7 +308,6 @@ export default function Utilisateurs() {
     return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
   }, [users]);
 
-  // derived
   const total = users.length;
 
   /* ----------------- Actions ------------------ */
@@ -355,8 +351,8 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      const id = getId(editUser);
-      const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
+      const id = idFromAny(editUser);
+      const payload = { ...editUser, role: "admin" }; // rester dans la liste
       const r = await axios.put(`${API_URL}/api/users/${encodeURIComponent(id)}`, payload, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
@@ -376,7 +372,7 @@ export default function Utilisateurs() {
   };
 
   const toggleActive = async (u) => {
-    const id = getId(u);
+    const id = idFromAny(u);
     try {
       setRowBusyId(id);
       setRowBusyAction("toggle");
@@ -420,7 +416,7 @@ export default function Utilisateurs() {
       return;
     }
     const endpoint = mode === "renew" ? "renew" : "start";
-    const id = getId(subUser);
+    const id = idFromAny(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -453,7 +449,7 @@ export default function Utilisateurs() {
 
   const cancelSub = async () => {
     if (!subUser) return;
-    const id = getId(subUser);
+    const id = idFromAny(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -483,7 +479,7 @@ export default function Utilisateurs() {
   };
 
   const openInvoices = async (u) => {
-    const id = getId(u);
+    const id = idFromAny(u);
     setInvUser(u);
     setShowInvoices(true);
     setLoadingInvoices(true);
@@ -817,7 +813,7 @@ export default function Utilisateurs() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const id = getId(u);
+                      const id = idFromAny(u);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
                       const subStatus =
@@ -864,7 +860,7 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                rowBusyAction.startsWith("sub-") && (
+                                (rowBusyAction.startsWith("sub-")) && (
                                   <Loader2 className="animate-spin text-gray-400" size={14} />
                                 )}
                             </div>

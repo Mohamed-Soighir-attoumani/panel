@@ -51,11 +51,11 @@ const objIdToString = (v) => {
 const uid = (u) =>
   String(
     objIdToString(u?._id) ||
-    u?._idString ||             // support champ serveur
-    u?.id ||
-    u?.userId ||
-    u?.email ||
-    ""
+      u?._idString || // support champ serveur
+      u?.id ||
+      u?.userId ||
+      u?.email ||
+      ""
   );
 
 const PAGE_SIZE = 15;
@@ -203,43 +203,43 @@ export default function Utilisateurs() {
   }, [token]);
 
   // --------- FETCH LISTE DES ADMINS ----------
-  const fetchAdmins = useCallback(async (opts = {}) => {
-    if (!API_URL || !token) return;
+  const fetchAdmins = useCallback(
+    async (opts = {}) => {
+      if (!API_URL || !token) return;
 
-    const currentPage = opts.page || page;
+      const currentPage = opts.page || page;
 
-    // cancel previous
-    if (listAbort.current) listAbort.current.abort();
-    const controller = new AbortController();
-    listAbort.current = controller;
+      // cancel previous
+      if (listAbort.current) listAbort.current.abort();
+      const controller = new AbortController();
+      listAbort.current = controller;
 
-    setLoadingList(true);
-    try {
-      const params = {
-        q: debouncedQ || undefined,
-        communeId: communeId || undefined,
-        status: statusFilter || undefined,
-        sub: subFilter || undefined,
-        role: "admin", // on force côté API
-        page: currentPage,
-        pageSize: PAGE_SIZE,
-      };
+      setLoadingList(true);
+      try {
+        const params = {
+          q: debouncedQ || undefined,
+          communeId: communeId || undefined,
+          status: statusFilter || undefined,
+          sub: subFilter || undefined,
+          role: "admin", // on force côté API
+          page: currentPage,
+          pageSize: PAGE_SIZE,
+        };
 
-      let list = [];
-      let hasMore = false;
+        let list = [];
+        let hasMore = false;
 
-      // 1) route dédiée si dispo
-      const r1 = await axios.get(`${API_URL}/api/admins`, {
-        headers: { Authorization: `Bearer ${token}` },
-        params,
-        timeout: 20000,
-        signal: controller.signal,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+        // 1) route dédiée si dispo
+        const r1 = await axios.get(`${API_URL}/api/admins`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params,
+          timeout: 20000,
+          signal: controller.signal,
+          validateStatus: (s) => s >= 200 && s < 500,
+        });
 
-      if (r1.status >= 200 && r1.status < 300) {
-        const items =
-          Array.isArray(r1.data?.items)
+        if (r1.status >= 200 && r1.status < 300) {
+          const items = Array.isArray(r1.data?.items)
             ? r1.data.items
             : Array.isArray(r1.data?.admins)
             ? r1.data.admins
@@ -247,23 +247,27 @@ export default function Utilisateurs() {
             ? r1.data
             : [];
 
-        // ✅ normalise _id pour les actions
-        list = items.map((u) => ({ ...u, _id: uid(u) }));
-        const total = Number(r1.data?.total || 0);
-        hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
-      } else {
-        // 2) fallback -> /api/users
-        const r2 = await axios.get(`${API_URL}/api/users`, {
-          headers: { Authorization: `Bearer ${token}` },
-          params,
-          timeout: 20000,
-          signal: controller.signal,
-          validateStatus: (s) => s >= 200 && s < 500,
-        });
-        if (r2.status >= 400)
-          throw new Error(r2.data?.message || `Erreur API (${r2.status})`);
-        const items =
-          Array.isArray(r2.data?.items)
+          // ✅ ne PAS écraser _id — on ajoute juste _idString pour l’UI
+          list = items.map((u) => ({
+            ...u,
+            _idString: u._idString || uid(u),
+          }));
+          const total = Number(r1.data?.total || 0);
+          hasMore = total
+            ? currentPage * PAGE_SIZE < total
+            : items.length === PAGE_SIZE;
+        } else {
+          // 2) fallback -> /api/users
+          const r2 = await axios.get(`${API_URL}/api/users`, {
+            headers: { Authorization: `Bearer ${token}` },
+            params,
+            timeout: 20000,
+            signal: controller.signal,
+            validateStatus: (s) => s >= 200 && s < 500,
+          });
+          if (r2.status >= 400)
+            throw new Error(r2.data?.message || `Erreur API (${r2.status})`);
+          const items = Array.isArray(r2.data?.items)
             ? r2.data.items
             : Array.isArray(r2.data?.users)
             ? r2.data.users
@@ -271,25 +275,32 @@ export default function Utilisateurs() {
             ? r2.data
             : [];
 
-        list = items.map((u) => ({ ...u, _id: uid(u) }));
-        const total = Number(r2.data?.total || 0);
-        hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
+          list = items.map((u) => ({
+            ...u,
+            _idString: u._idString || uid(u),
+          }));
+          const total = Number(r2.data?.total || 0);
+          hasMore = total
+            ? currentPage * PAGE_SIZE < total
+            : items.length === PAGE_SIZE;
+        }
+
+        // garde-fou client : conserve uniquement role=admin
+        list = list.filter((u) => norm(u.role) === "admin");
+
+        safeSet(setUsers)(list);
+        safeSet(setServerHasMore)(hasMore);
+      } catch (e) {
+        if (e.name === "CanceledError" || e.message === "canceled") return;
+        toast.error(normalizeErr(e, "Erreur chargement administrateurs"));
+        safeSet(setUsers)([]);
+        safeSet(setServerHasMore)(false);
+      } finally {
+        setLoadingList(false);
       }
-
-      // garde-fou client : conserve uniquement role=admin
-      list = list.filter((u) => norm(u.role) === "admin");
-
-      safeSet(setUsers)(list);
-      safeSet(setServerHasMore)(hasMore);
-    } catch (e) {
-      if (e.name === "CanceledError" || e.message === "canceled") return;
-      toast.error(normalizeErr(e, "Erreur chargement administrateurs"));
-      safeSet(setUsers)([]);
-      safeSet(setServerHasMore)(false);
-    } finally {
-      setLoadingList(false);
-    }
-  }, [API_URL, token, debouncedQ, communeId, statusFilter, subFilter, page]);
+    },
+    [API_URL, token, debouncedQ, communeId, statusFilter, subFilter, page]
+  );
 
   // auto refresh when filters change
   useEffect(() => {
@@ -298,7 +309,16 @@ export default function Utilisateurs() {
       fetchAdmins({ page: 1 });
       loadPlans();
     }
-  }, [loadingMe, me, debouncedQ, communeId, statusFilter, subFilter, fetchAdmins, loadPlans]);
+  }, [
+    loadingMe,
+    me,
+    debouncedQ,
+    communeId,
+    statusFilter,
+    subFilter,
+    fetchAdmins,
+    loadPlans,
+  ]);
 
   // communes list (à partir des admins filtrés)
   const communes = useMemo(() => {
@@ -318,7 +338,16 @@ export default function Utilisateurs() {
 
   const exportCSV = () => {
     const rows = [
-      ["email", "name", "role", "communeId", "communeName", "isActive", "subStatus", "subEndAt"],
+      [
+        "email",
+        "name",
+        "role",
+        "communeId",
+        "communeName",
+        "isActive",
+        "subStatus",
+        "subEndAt",
+      ],
       ...users.map((u) => [
         u.email || "",
         u.name || "",
@@ -343,6 +372,7 @@ export default function Utilisateurs() {
   };
 
   const openEdit = (u) => {
+    // on clone sans polluer l’original
     setEditUser({ ...u });
     setShowEdit(true);
   };
@@ -356,12 +386,23 @@ export default function Utilisateurs() {
     try {
       setDoingAction(true);
       const id = uid(editUser);
-      const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
-      const r = await axios.put(`${API_URL}/api/users/${encodeURIComponent(id)}`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+      // ⚠️ n'envoyer que les champs éditables (évite _id, role, etc.)
+      const payload = {
+        email: editUser.email,
+        name: editUser.name,
+        communeId: editUser.communeId,
+        communeName: editUser.communeName,
+        role: "admin", // verrouillage côté serveur aussi
+      };
+      const r = await axios.put(
+        `${API_URL}/api/users/${encodeURIComponent(id)}`,
+        payload,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 20000,
+          validateStatus: (s) => s >= 200 && s < 500,
+        }
+      );
       if (r.status >= 400)
         throw new Error(r.data?.message || "Échec de la mise à jour");
       toast.success("Administrateur mis à jour ✅");
@@ -488,11 +529,14 @@ export default function Utilisateurs() {
     setShowInvoices(true);
     setLoadingInvoices(true);
     try {
-      const r = await axios.get(`${API_URL}/api/users/${encodeURIComponent(id)}/invoices`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+      const r = await axios.get(
+        `${API_URL}/api/users/${encodeURIComponent(id)}/invoices`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 20000,
+          validateStatus: (s) => s >= 200 && s < 500,
+        }
+      );
       if (r.status >= 400)
         throw new Error(r.data?.message || "Factures indisponibles");
       const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
@@ -523,17 +567,20 @@ export default function Utilisateurs() {
     try {
       setCreating(true);
       const payload = {
-        ...createForm,
+        email: createForm.email,
+        password: createForm.password,
+        name: createForm.name,
+        communeId: createForm.communeId,
+        communeName: createForm.communeName,
         role: "admin",
-        createdBy: me?._id || me?.id,
+        createdBy: me?.id || me?._id || "",
       };
       const r = await axios.post(`${API_URL}/api/users`, payload, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
         validateStatus: (s) => s >= 200 && s < 500,
       });
-      if (r.status >= 400)
-        throw new Error(r.data?.message || "Création refusée");
+      if (r.status >= 400) throw new Error(r.data?.message || "Création refusée");
       toast.success("Administrateur créé ✅");
       setCreateForm({
         email: "",
@@ -798,21 +845,16 @@ export default function Utilisateurs() {
                 <table className="min-w-full border border-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      {[
-                        "Email",
-                        "Nom",
-                        "Commune",
-                        "Statut",
-                        "Abonnement",
-                        "Actions",
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b"
-                        >
-                          {h}
-                        </th>
-                      ))}
+                      {["Email", "Nom", "Commune", "Statut", "Abonnement", "Actions"].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b"
+                          >
+                            {h}
+                          </th>
+                        )
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -820,11 +862,21 @@ export default function Utilisateurs() {
                       const id = uid(u);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
-                      const subStatus =
+
+                      // ✅ statut “expiré” dérivé si la date est passée
+                      const endDate = u.subscriptionEndAt
+                        ? new Date(u.subscriptionEndAt)
+                        : null;
+                      const now = new Date();
+                      const rawStatus =
                         u.subscriptionStatus ||
-                        (u.subscriptionEndAt ? "active" : "none");
-                      const subEnd = u.subscriptionEndAt
-                        ? new Date(u.subscriptionEndAt).toLocaleDateString()
+                        (endDate ? "active" : "none");
+                      const effStatus =
+                        rawStatus === "active" && endDate && endDate < now
+                          ? "expired"
+                          : rawStatus;
+                      const subEnd = endDate
+                        ? endDate.toLocaleDateString()
                         : null;
 
                       const isRowBusy = rowBusyId === id;
@@ -842,19 +894,22 @@ export default function Utilisateurs() {
                                 {active ? "Actif" : "Inactif"}
                               </Pill>
                               {isRowBusy && rowBusyAction === "toggle" && (
-                                <Loader2 className="animate-spin text-gray-400" size={14} />
+                                <Loader2
+                                  className="animate-spin text-gray-400"
+                                  size={14}
+                                />
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-2 border-b text-sm">
                             <div className="flex items-center gap-2">
                               <Pill
-                                ok={subStatus === "active"}
+                                ok={effStatus === "active"}
                                 title={subEnd ? `Jusqu'au ${subEnd}` : ""}
                               >
-                                {subStatus === "active"
+                                {effStatus === "active"
                                   ? "Actif"
-                                  : subStatus === "expired"
+                                  : effStatus === "expired"
                                   ? "Expiré"
                                   : "Aucun"}
                               </Pill>
@@ -864,8 +919,11 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                (rowBusyAction.startsWith("sub-")) && (
-                                  <Loader2 className="animate-spin text-gray-400" size={14} />
+                                rowBusyAction.startsWith("sub-") && (
+                                  <Loader2
+                                    className="animate-spin text-gray-400"
+                                    size={14}
+                                  />
                                 )}
                             </div>
                           </td>
@@ -960,7 +1018,10 @@ export default function Utilisateurs() {
 
       {/* MODAL EDIT */}
       {showEdit && editUser && (
-        <Modal onClose={() => setShowEdit(false)} title="Modifier l’administrateur">
+        <Modal
+          onClose={() => setShowEdit(false)}
+          title="Modifier l’administrateur"
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-gray-600">Email</label>
@@ -1024,7 +1085,8 @@ export default function Utilisateurs() {
               onClick={saveEdit}
               disabled={doingAction}
             >
-              <Save size={16} /> {doingAction ? "Enregistrement…" : "Enregistrer"}
+              <Save size={16} />{" "}
+              {doingAction ? "Enregistrement…" : "Enregistrer"}
             </button>
           </div>
         </Modal>
@@ -1032,7 +1094,10 @@ export default function Utilisateurs() {
 
       {/* MODAL SUBSCRIPTION */}
       {showSub && subUser && (
-        <Modal onClose={() => setShowSub(false)} title={`Abonnement – ${subUser.email}`}>
+        <Modal
+          onClose={() => setShowSub(false)}
+          title={`Abonnement – ${subUser.email}`}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="sm:col-span-2">
               <label className="text-xs text-gray-600">Plan</label>
@@ -1044,7 +1109,9 @@ export default function Utilisateurs() {
                 }
               >
                 {loadingPlans && <option>Chargement…</option>}
-                {!loadingPlans && plans.length === 0 && <option>Aucun plan</option>}
+                {!loadingPlans && plans.length === 0 && (
+                  <option>Aucun plan</option>
+                )}
                 {plans.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} – {p.price} {p.currency}/{p.period}
@@ -1095,7 +1162,8 @@ export default function Utilisateurs() {
               onClick={() => startOrRenew("start")}
               disabled={doingAction}
             >
-              <BadgeCheck size={16} /> {doingAction ? "Traitement…" : "Démarrer"}
+              <BadgeCheck size={16} />{" "}
+              {doingAction ? "Traitement…" : "Démarrer"}
             </button>
             <button
               className="px-3 py-2 border rounded hover:bg-gray-50 flex items-center gap-1 disabled:opacity-50"
@@ -1117,7 +1185,10 @@ export default function Utilisateurs() {
 
       {/* MODAL INVOICES */}
       {showInvoices && invUser && (
-        <Modal onClose={() => setShowInvoices(false)} title={`Factures – ${invUser.email}`}>
+        <Modal
+          onClose={() => setShowInvoices(false)}
+          title={`Factures – ${invUser.email}`}
+        >
           {loadingInvoices ? (
             <div className="text-gray-500 flex items-center gap-2">
               <Loader2 className="animate-spin" size={16} /> Chargement…

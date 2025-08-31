@@ -111,12 +111,13 @@ export default function Header() {
         : 'Tableau de bord';
 
   const isSuperadmin = norm(me.role) === 'superadmin';
+  const isAdmin = norm(me.role) === 'admin'; // 👉 Visible seulement pour admin
   const badgeUnderAvatar = isSuperadmin
     ? 'SUPERADMINISTRATEUR'
     : ((me.communeName || '').trim());
 
   // Hauteur cible du header ~56px (h-10 avatar + bordure + py-2)
-  // => on fixe les barres sous le header à top-[65px]
+  // => on fixe les barres sous le header à top-[56px]
   return (
     <>
       {/* Bannière impersonation (compacte, ne change pas la hauteur du header) */}
@@ -133,7 +134,7 @@ export default function Header() {
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black">
           <div className="flex items-center justify-between px-4 sm:px-6 py-2 max-w-screen-xl mx-auto">
-            {/* Gauche : burger + 💳 Mon Abonnement */}
+            {/* Gauche : burger + (si admin) 💳 Mon Abonnement */}
             <div className="flex items-center">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -143,24 +144,28 @@ export default function Header() {
                 <Menu className="w-6 h-6 text-gray-600" />
               </button>
 
-              {/* 💳 Mon Abonnement — visible pour tous les rôles connectés (admin & superadmin) */}
-              {/* Version compacte mobile (icône seule) */}
-              <Link
-                to="/mon-abonnement"
-                className="sm:hidden ml-2 p-2 rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
-                aria-label="Mon abonnement"
-              >
-                💳
-              </Link>
-              {/* Version texte pour ≥ sm */}
-              <Link
-                to="/mon-abonnement"
-                className="hidden sm:inline-flex ml-2 items-center gap-1 px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
-                title="Voir mon abonnement et mes factures"
-              >
-                <span>💳</span>
-                <span>Mon abonnement</span>
-              </Link>
+              {/* 💳 Mon Abonnement — visible UNIQUEMENT pour admin */}
+              {isAdmin && (
+                <>
+                  {/* Version compacte mobile (icône seule) */}
+                  <Link
+                    to="/mon-abonnement"
+                    className="sm:hidden ml-2 p-2 rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
+                    aria-label="Mon abonnement"
+                  >
+                    💳
+                  </Link>
+                  {/* Version texte pour ≥ sm */}
+                  <Link
+                    to="/mon-abonnement"
+                    className="hidden sm:inline-flex ml-2 items-center gap-1 px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
+                    title="Voir mon abonnement et mes factures"
+                  >
+                    <span>💳</span>
+                    <span>Mon abonnement</span>
+                  </Link>
+                </>
+              )}
             </div>
 
             {/* Titre centré */}
@@ -336,10 +341,14 @@ export default function Header() {
             <Link to="/projects/liste" onClick={() => setMenuOpen(false)} className="block py-2">
               📄 Liste des projets
             </Link>
-            {/* 💳 Lien mon abonnement aussi dans le menu mobile */}
-            <Link to="/mon-abonnement" onClick={() => setMenuOpen(false)} className="block py-2">
-              💳 Mon abonnement
-            </Link>
+
+            {/* 💳 Mon abonnement — visible UNIQUEMENT pour admin (pas superadmin) */}
+            {isAdmin && (
+              <Link to="/mon-abonnement" onClick={() => setMenuOpen(false)} className="block py-2">
+                💳 Mon abonnement
+              </Link>
+            )}
+
             {isSuperadmin && (
               <Link to="/admins" onClick={() => setMenuOpen(false)} className="block py-2">
                 👥 Administrateurs (communes)

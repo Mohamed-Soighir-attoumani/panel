@@ -31,12 +31,13 @@ export default function MonAbonnement() {
 
   useEffect(() => {
     mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
+    return () => { mounted.current = false; };
   }, []);
 
-  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const headers = useMemo(
+    () => ({ Authorization: `Bearer ${token}` }),
+    [token]
+  );
 
   const fetchMe = useCallback(async () => {
     const r = await axios.get(`${API_URL}/api/me`, {
@@ -50,29 +51,31 @@ export default function MonAbonnement() {
       window.location.href = "/login";
       return null;
     }
-    if (r.status >= 400) throw new Error(r.data?.message || "Erreur /api/me");
+    if (r.status >= 400) {
+      throw new Error(r.data?.message || "Erreur /api/me");
+    }
     return r.data?.user || null;
   }, [headers]);
 
-  const fetchSubscription = useCallback(
-    async (user) => {
-      try {
-        const r = await axios.get(`${API_URL}/api/my-subscription`, {
-          headers,
-          timeout: 15000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        });
-        if (r.status >= 400) throw new Error(r.data?.message || "my-subscription indisponible");
-        return { status: r.data?.status || "none", endAt: r.data?.endAt || null };
-      } catch {
-        return {
-          status: user?.subscriptionStatus || "none",
-          endAt: user?.subscriptionEndAt || null,
-        };
-      }
-    },
-    [headers]
-  );
+  const fetchSubscription = useCallback(async (user) => {
+    try {
+      const r = await axios.get(`${API_URL}/api/my-subscription`, {
+        headers,
+        timeout: 15000,
+        validateStatus: (s) => s >= 200 && s < 500,
+      });
+      if (r.status >= 400) throw new Error(r.data?.message || "my-subscription indisponible");
+      return {
+        status: r.data?.status || "none",
+        endAt: r.data?.endAt || null,
+      };
+    } catch {
+      return {
+        status: user?.subscriptionStatus || "none",
+        endAt: user?.subscriptionEndAt || null,
+      };
+    }
+  }, [headers]);
 
   const fetchInvoices = useCallback(async () => {
     const r = await axios.get(`${API_URL}/api/my-invoices`, {
@@ -80,7 +83,9 @@ export default function MonAbonnement() {
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
     });
-    if (r.status >= 400) return [];
+    if (r.status >= 400) {
+      return [];
+    }
     const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
     return arr;
   }, [headers]);
@@ -116,10 +121,12 @@ export default function MonAbonnement() {
     loadAll();
   }, [loadAll]);
 
-  // Auto-refresh à chaque retour sur l’onglet
+  // Auto-refresh quand l’onglet redevient actif (superadmin a pu agir)
   useEffect(() => {
     const onFocus = () => {
-      if (document.visibilityState === "visible") handleRefreshLight();
+      if (document.visibilityState === "visible") {
+        handleRefresh();
+      }
     };
     document.addEventListener("visibilitychange", onFocus);
     window.addEventListener("focus", onFocus);
@@ -129,22 +136,10 @@ export default function MonAbonnement() {
     };
   }, []);
 
-  // Petit polling (20s * 9 ~ 3 minutes) pour capter un changement récent
-  useEffect(() => {
-    let count = 0;
-    const timer = setInterval(async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        await handleRefreshLight();
-      } catch {}
-      count += 1;
-      if (count >= 9) clearInterval(timer);
-    }, 20000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const handleRefreshLight = async () => {
+// Action manuelle "Rafraîchir"
+  const handleRefresh = async () => {
     try {
+      setRefreshing(true);
       const user = await fetchMe();
       safeSet(setMe)(user);
 
@@ -153,15 +148,7 @@ export default function MonAbonnement() {
 
       const inv = await fetchInvoices();
       safeSet(setInvoices)(inv);
-    } catch {
-      /* silencieux */
-    }
-  };
 
-  const handleRefresh = async () => {
-    try {
-      setRefreshing(true);
-      await handleRefreshLight();
       toast.success("Mise à jour effectuée ✅");
     } catch (e) {
       toast.error(e?.response?.data?.message || e?.message || "Échec de l’actualisation");
@@ -177,26 +164,27 @@ export default function MonAbonnement() {
   const endDate = sub?.endAt ? new Date(sub.endAt) : null;
   const isExpired = endDate ? endDate.getTime() < now.getTime() : false;
 
-  // Si backend a dit "active" mais la date est dépassée → on force "expired"
-  const derivedStatus = sub.status === "active" && isExpired ? "expired" : (sub.status || "none");
+  const derivedStatus =
+    sub.status === "active" && isExpired ? "expired" : (sub.status || "none");
 
   const statusLabel =
-    derivedStatus === "active" ? "Actif" : derivedStatus === "expired" ? "Expiré" : "Aucun";
+    derivedStatus === "active" ? "Actif" :
+    derivedStatus === "expired" ? "Expiré" :
+    "Aucun";
 
   const endLabel = endDate ? endDate.toLocaleString() : "—";
 
-  const statusClasses =
-    derivedStatus === "active"
-      ? "bg-green-50 text-green-700 border-green-200"
-      : derivedStatus === "expired"
-      ? "bg-red-50 text-red-700 border-red-200"
-      : "bg-gray-100 text-gray-600 border-gray-200";
+  const statusClasses = derivedStatus === "active"
+    ? "bg-green-50 text-green-700 border-green-200"
+    : derivedStatus === "expired"
+    ? "bg-red-50 text-red-700 border-red-200"
+    : "bg-gray-100 text-gray-600 border-gray-200";
 
   const totalPaid = invoices
     .filter((i) => norm(i.status) === "paid")
     .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
 
-  // --------- PDF Facture (lazy import) ---------
+  // --------- Téléchargement PDF (lazy import) ---------
   const downloadInvoicePdf = async (inv) => {
     try {
       const jsPDFMod = await import("jspdf");
@@ -225,7 +213,7 @@ export default function MonAbonnement() {
 
       autoTableMod.default(doc, {
         startY: y + 4,
-        head: [["Champ", "Valeur"]],
+        head: [["Champ", "Valeur"]]],
         body: [
           ["Numéro", inv.number || inv.id || "—"],
           ["Montant", `${fmtMoney(Number(inv.amount) || 0)} ${inv.currency || ""}`],
@@ -239,7 +227,9 @@ export default function MonAbonnement() {
       doc.save(fname);
       toast.success("PDF téléchargé ✅");
     } catch (e) {
-      toast.error("Génération PDF indisponible. Installe `jspdf` et `jspdf-autotable` dans le front.");
+      toast.error(
+        "Génération PDF indisponible. Assure-toi que `jspdf` et `jspdf-autotable` sont installés."
+      );
     }
   };
 
@@ -268,8 +258,11 @@ export default function MonAbonnement() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-gray-500">Statut</div>
-                  <div className={`inline-flex items-center gap-2 px-2 py-1 rounded-full text-xs border ${statusClasses}`}>
-                    {derivedStatus === "active" ? "🟢" : derivedStatus === "expired" ? "🔴" : "⚪️"} {statusLabel}
+                  <div
+                    className={`inline-flex items-center gap-2 px-2 py-1 rounded-full text-xs border ${statusClasses}`}
+                  >
+                    {derivedStatus === "active" ? "🟢" : derivedStatus === "expired" ? "🔴" : "⚪️"}{" "}
+                    {statusLabel}
                   </div>
                 </div>
 
@@ -286,7 +279,8 @@ export default function MonAbonnement() {
 
               {isSuperadmin ? (
                 <p className="mt-3 text-xs text-gray-500">
-                  (Vous êtes connecté en superadministrateur. Cette page est destinée aux administrateurs.)
+                  (Vous êtes connecté en superadministrateur. Cette page est destinée aux administrateurs
+                  pour visualiser leur abonnement.)
                 </p>
               ) : (
                 <p className="mt-3 text-xs text-gray-500">
@@ -315,7 +309,7 @@ export default function MonAbonnement() {
               Aucune facture disponible pour le moment.
               {derivedStatus === "active" ? (
                 <span className="ml-1">
-                  (Si votre abonnement vient d’être activé, revenez dans un instant ou cliquez sur <em>Rafraîchir</em>.)
+                  (Si votre abonnement vient d’être activé par le superadmin, cliquez sur <em>Rafraîchir</em>.)
                 </span>
               ) : null}
             </div>
@@ -325,7 +319,10 @@ export default function MonAbonnement() {
                 <thead className="bg-gray-50">
                   <tr>
                     {["Numéro", "Montant", "Statut", "Date", "Lien", "PDF"].map((h) => (
-                      <th key={h} className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b">
+                      <th
+                        key={h}
+                        className="text-left text-xs font-semibold text-gray-600 px-4 py-2 border-b"
+                      >
                         {h}
                       </th>
                     ))}
@@ -343,7 +340,9 @@ export default function MonAbonnement() {
                         <td className="px-4 py-2 border-b text-sm">
                           <span
                             className={`px-2 py-0.5 rounded-full text-xs border ${
-                              isPaid ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200"
+                              isPaid
+                                ? "bg-green-50 text-green-700 border-green-200"
+                                : "bg-gray-100 text-gray-600 border-gray-200"
                             }`}
                           >
                             {f.status || "—"}
@@ -354,7 +353,12 @@ export default function MonAbonnement() {
                         </td>
                         <td className="px-4 py-2 border-b text-sm">
                           {f.url ? (
-                            <a href={f.url} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                            <a
+                              href={f.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 underline"
+                            >
                               Voir
                             </a>
                           ) : (

@@ -94,7 +94,6 @@ export default function Utilisateurs() {
   const [rowBusyAction, setRowBusyAction] = useState("");
 
   // plans / modals
-  the:
   const [plans, setPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
 

@@ -3,7 +3,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { Loader2, CheckCircle, XCircle, FileText } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, FileText, Download } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
 
@@ -11,11 +13,149 @@ const norm = (v) => (v || "").toString().trim().toLowerCase();
 const normalizeErr = (e, fallback = "Erreur") =>
   e?.response?.data?.message || e?.message || fallback;
 
+const formatEUR = (n, currency = "EUR") =>
+  new Intl.NumberFormat("fr-FR", { style: "currency", currency }).format(Number(n || 0));
+
+const formatDate = (d) => {
+  try {
+    return new Date(d).toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "long",
+      day: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+};
+
 const Pill = ({ ok, children }) => (
-  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${ok ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-600 border-gray-200"}`}>
+  <span
+    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${
+      ok
+        ? "bg-green-50 text-green-700 border-green-200"
+        : "bg-gray-100 text-gray-600 border-gray-200"
+    }`}
+  >
     {ok ? <CheckCircle size={12} /> : <XCircle size={12} />} {children}
   </span>
 );
+
+/**
+ * Génère un PDF de facture localement (sans passer par le backend).
+ * On part des champs renvoyés par /api/me/invoices :
+ *   { id, number, amount, currency, status, date, url? }
+ */
+function generateInvoicePDF({ invoice, user, subscription }) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+  const marginX = 48;
+  const lineY = 28;
+
+  // En-tête
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("SecuriDem", marginX, 60);
+  doc.setFontSize(10);
+  doc.setFont("Helvetica", "normal");
+  doc.text("Plateforme de sécurité citoyenne", marginX, 78);
+
+  // Infos facture
+  doc.setFont("Helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(`Facture ${invoice.number || invoice.id}`, marginX, 120);
+
+  doc.setFontSize(10);
+  doc.setFont("Helvetica", "normal");
+  const rightColX = 340;
+
+  const todayStr = formatDate(new Date());
+  doc.text(`Date d'émission : ${todayStr}`, rightColX, 60);
+  doc.text(
+    `Statut : ${invoice.status === "paid" ? "Payée" : invoice.status || "—"}`,
+    rightColX,
+    76
+  );
+
+  // Infos client
+  const clientY = 160;
+  doc.setFont("Helvetica", "bold");
+  doc.text("Client", marginX, clientY);
+  doc.setFont("Helvetica", "normal");
+  doc.text(`${user?.name || "—"}`, marginX, clientY + lineY);
+  doc.text(`${user?.email || "—"}`, marginX, clientY + lineY * 2);
+  if (user?.communeName || user?.communeId) {
+    doc.text(
+      `Commune : ${user?.communeName || user?.communeId}`,
+      marginX,
+      clientY + lineY * 3
+    );
+  }
+
+  // Détails abonnement
+  const subY = clientY + lineY * 5;
+  doc.setFont("Helvetica", "bold");
+  doc.text("Abonnement", marginX, subY);
+  doc.setFont("Helvetica", "normal");
+
+  const statusLabel =
+    subscription?.status === "active"
+      ? "Activé"
+      : subscription?.status === "expired"
+      ? "Expiré"
+      : "Aucun";
+
+  doc.text(`Statut : ${statusLabel}`, marginX, subY + lineY);
+  if (subscription?.endAt) {
+    doc.text(`Échéance : ${formatDate(subscription.endAt)}`, marginX, subY + lineY * 2);
+  }
+
+  // Tableau lignes (autoTable)
+  const itemsY = subY + lineY * 3;
+  const rows = [
+    [
+      "Abonnement SecuriDem",
+      invoice.status === "paid" ? "Payée" : "À régler",
+      formatEUR(invoice.amount, invoice.currency),
+    ],
+  ];
+  autoTable(doc, {
+    startY: itemsY,
+    head: [["Description", "Statut", "Montant TTC"]],
+    body: rows,
+    styles: { font: "Helvetica", fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [33, 33, 33], textColor: 255 },
+    margin: { left: marginX, right: marginX },
+  });
+
+  // Totaux
+  const afterTableY = doc.lastAutoTable.finalY + 16;
+  doc.setFont("Helvetica", "bold");
+  doc.text(
+    `Total TTC : ${formatEUR(invoice.amount, invoice.currency)}`,
+    rightColX,
+    afterTableY
+  );
+
+  // Pied de page
+  const pageHeight = doc.internal.pageSize.getHeight();
+  doc.setFontSize(9);
+  doc.setFont("Helvetica", "normal");
+  doc.text(
+    "Merci pour votre confiance.",
+    marginX,
+    pageHeight - 50
+  );
+  doc.text(
+    "Ce document a été généré automatiquement par SecuriDem.",
+    marginX,
+    pageHeight - 34
+  );
+
+  const fileName = `Facture-${(invoice.number || invoice.id || "SecuriDem")
+    .toString()
+    .replace(/\s+/g, "_")}.pdf`;
+  doc.save(fileName);
+}
 
 export default function MonAbonnement() {
   const token = useMemo(() => localStorage.getItem("token") || "", []);
@@ -116,7 +256,7 @@ export default function MonAbonnement() {
 
   const active = sub.status === "active";
   const expired = sub.status === "expired";
-  const end = sub.endAt ? new Date(sub.endAt).toLocaleDateString() : null;
+  const end = sub.endAt ? formatDate(sub.endAt) : null;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
@@ -134,9 +274,7 @@ export default function MonAbonnement() {
                 <Pill ok={active}>
                   {active ? "Activé" : expired ? "Expiré" : "Aucun"}
                 </Pill>
-                {end && (
-                  <span className="text-xs text-gray-500">Jusqu’au {end}</span>
-                )}
+                {end && <span className="text-xs text-gray-500">Jusqu’au {end}</span>}
               </div>
             )}
           </div>
@@ -145,6 +283,22 @@ export default function MonAbonnement() {
         <div className="bg-white shadow rounded-lg p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-800">Mes factures</h2>
+            {/* Téléchargement de toutes les factures en un clic (optionnel) */}
+            {invoices.length > 0 && (
+              <button
+                onClick={() => {
+                  // Génère une par une (simple). Pour un zip, il faudrait JSZip.
+                  invoices.forEach((f) =>
+                    generateInvoicePDF({ invoice: f, user: me, subscription: sub })
+                  );
+                }}
+                className="px-3 py-2 border rounded hover:bg-gray-50 text-sm inline-flex items-center gap-2"
+                title="Télécharger chaque facture en PDF"
+              >
+                <Download size={16} />
+                Tout télécharger
+              </button>
+            )}
           </div>
 
           {loadingInvoices ? (
@@ -156,26 +310,47 @@ export default function MonAbonnement() {
           ) : (
             <div className="mt-3 space-y-2">
               {invoices.map((f, i) => (
-                <div key={i} className="border rounded px-3 py-2 flex items-center justify-between">
+                <div
+                  key={i}
+                  className="border rounded px-3 py-2 flex items-center justify-between"
+                >
                   <div>
-                    <div className="text-sm font-medium text-gray-800">{f.number || f.id}</div>
+                    <div className="text-sm font-medium text-gray-800">
+                      {f.number || f.id}
+                    </div>
                     <div className="text-xs text-gray-500">
-                      {f.amount} {f.currency} – {f.status} – {f.date ? new Date(f.date).toLocaleDateString() : ""}
+                      {formatEUR(f.amount, f.currency)} – {f.status} –{" "}
+                      {f.date ? formatDate(f.date) : ""}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     {f.url && (
-                      <a href={f.url} target="_blank" rel="noreferrer" className="text-blue-600 text-sm underline flex items-center gap-1">
+                      <a
+                        href={f.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 text-sm underline flex items-center gap-1"
+                        title="Voir la facture d’origine"
+                      >
                         <FileText size={14} /> Voir
                       </a>
                     )}
+                    <button
+                      onClick={() =>
+                        generateInvoicePDF({ invoice: f, user: me, subscription: sub })
+                      }
+                      className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm inline-flex items-center gap-2"
+                      title="Télécharger en PDF"
+                    >
+                      <Download size={14} />
+                      Télécharger PDF
+                    </button>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
-
       </div>
     </div>
   );

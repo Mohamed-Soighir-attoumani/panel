@@ -24,6 +24,9 @@ import ProjectListPage from "./pages/ProjectListPage";
 import InfosList from "./pages/InfosList";
 import InfosCreate from "./pages/InfosCreate";
 
+// 💳 Abonnement (nouvelle page)
+import MonAbonnement from "./pages/MonAbonnement";
+
 // Layout
 import Layout from "./components/Layout";
 
@@ -109,19 +112,20 @@ const App = () => {
           <Route
             path="/infos"
             element={
-        <RequireRole role="admin">
-        <InfosList />
-        </RequireRole>
-          }
+              <RequireRole role="admin">
+                <InfosList />
+              </RequireRole>
+            }
           />
-        <Route
-          path="/infos/nouveau"
-          element={
-          <RequireRole role="admin">
-          <InfosCreate />
-        </RequireRole>
-          }
-        />          
+          <Route
+            path="/infos/nouveau"
+            element={
+              <RequireRole role="admin">
+                <InfosCreate />
+              </RequireRole>
+            }
+          />
+
           {/* Projets */}
           {/* Liste */}
           <Route path="/projects/liste" element={<ProjectListPage />} />
@@ -139,6 +143,16 @@ const App = () => {
             element={
               <RequireRole role="admin">
                 <ProjectCreate />
+              </RequireRole>
+            }
+          />
+
+          {/* 💳 Mon Abonnement (admin et superadmin y ont accès) */}
+          <Route
+            path="/mon-abonnement"
+            element={
+              <RequireRole role="admin">
+                <MonAbonnement />
               </RequireRole>
             }
           />

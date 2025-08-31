@@ -31,7 +31,9 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
 
-// ✅ Extraction d'ID ultra-robuste (gère ObjectId, $oid, string…)
+const PAGE_SIZE = 15;
+
+/** Extraction d'ObjectId vers string (gère $oid, objets, etc.) */
 const objIdToString = (v) => {
   if (!v) return "";
   if (typeof v === "string") return v;
@@ -47,10 +49,10 @@ const objIdToString = (v) => {
   }
   return "";
 };
-const uid = (u) =>
-  objIdToString(u?._id) || String(u?.id || u?.userId || u?.email || "");
 
-const PAGE_SIZE = 15;
+/** ID canonique, priorité à _idString renvoyé par l'API */
+const getId = (u) =>
+  (u && (u._idString || objIdToString(u._id) || u.id || u.userId || u.email || "")).toString();
 
 /* Small pill */
 const Pill = ({ ok, children, title }) => (
@@ -92,6 +94,7 @@ export default function Utilisateurs() {
   const [rowBusyAction, setRowBusyAction] = useState("");
 
   // plans / modals
+  the:
   const [plans, setPlans] = useState([]);
   const [loadingPlans, setLoadingPlans] = useState(false);
 
@@ -239,8 +242,11 @@ export default function Utilisateurs() {
             ? r1.data
             : [];
 
-        // ✅ normalize _id → string
-        list = items.map((u) => ({ ...u, _id: uid(u) }));
+        // ✅ normalise l'ID pour le front
+        list = items.map((u) => ({
+          ...u,
+          _idString: u._idString || objIdToString(u._id),
+        }));
         const total = Number(r1.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
@@ -263,8 +269,10 @@ export default function Utilisateurs() {
             ? r2.data
             : [];
 
-        // ✅ normalize _id → string
-        list = items.map((u) => ({ ...u, _id: uid(u) }));
+        list = items.map((u) => ({
+          ...u,
+          _idString: u._idString || objIdToString(u._id),
+        }));
         const total = Number(r2.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       }
@@ -348,7 +356,7 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      const id = uid(editUser);
+      const id = getId(editUser);
       const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
       const r = await axios.put(`${API_URL}/api/users/${encodeURIComponent(id)}`, payload, {
         headers: { Authorization: `Bearer ${token}` },
@@ -369,7 +377,7 @@ export default function Utilisateurs() {
   };
 
   const toggleActive = async (u) => {
-    const id = uid(u);
+    const id = getId(u);
     try {
       setRowBusyId(id);
       setRowBusyAction("toggle");
@@ -413,7 +421,7 @@ export default function Utilisateurs() {
       return;
     }
     const endpoint = mode === "renew" ? "renew" : "start";
-    const id = uid(subUser);
+    const id = getId(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -446,7 +454,7 @@ export default function Utilisateurs() {
 
   const cancelSub = async () => {
     if (!subUser) return;
-    const id = uid(subUser);
+    const id = getId(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -476,7 +484,7 @@ export default function Utilisateurs() {
   };
 
   const openInvoices = async (u) => {
-    const id = uid(u);
+    const id = getId(u);
     setInvUser(u);
     setShowInvoices(true);
     setLoadingInvoices(true);
@@ -810,7 +818,7 @@ export default function Utilisateurs() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const id = uid(u);
+                      const id = getId(u);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
                       const subStatus =
@@ -857,7 +865,7 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                (rowBusyAction.startsWith("sub-")) && (
+                                rowBusyAction.startsWith("sub-") && (
                                   <Loader2 className="animate-spin text-gray-400" size={14} />
                                 )}
                             </div>

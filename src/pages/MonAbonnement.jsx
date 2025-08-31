@@ -25,7 +25,7 @@ export default function MonAbonnement() {
           return;
         }
 
-        // 1) /api/me (pour l’identité)
+        // 1) /api/me
         const rMe = await axios.get(`${API_URL}/api/me`, {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 15000,
@@ -33,7 +33,7 @@ export default function MonAbonnement() {
         const user = rMe.data?.user || null;
         setMe(user);
 
-        // 2) Abonnement : endpoint dédié (admin/superadmin)
+        // 2) statut d'abonnement
         try {
           const rSub = await axios.get(`${API_URL}/api/my-subscription`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -44,14 +44,13 @@ export default function MonAbonnement() {
             endAt: rSub.data?.endAt || null,
           });
         } catch {
-          // fallback sur /api/me si le endpoint n’est pas (encore) déployé
           setSub({
             status: user?.subscriptionStatus || "none",
             endAt: user?.subscriptionEndAt || null,
           });
         }
 
-        // 3) Factures : endpoint dédié (admin/superadmin)
+        // 3) factures
         try {
           const rInv = await axios.get(`${API_URL}/api/my-invoices`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -84,7 +83,6 @@ export default function MonAbonnement() {
       <div className="max-w-3xl mx-auto space-y-6">
         <h1 className="text-2xl font-bold text-gray-800">Mon abonnement</h1>
 
-        {/* Carte abonnement */}
         <div className="bg-white shadow rounded-lg p-4">
           {loading ? (
             <div className="text-gray-500">Chargement…</div>
@@ -118,7 +116,6 @@ export default function MonAbonnement() {
           )}
         </div>
 
-        {/* Factures */}
         <div className="bg-white shadow rounded-lg p-4">
           <h2 className="text-lg font-semibold text-gray-800 mb-3">Mes factures</h2>
           {loadingInv ? (

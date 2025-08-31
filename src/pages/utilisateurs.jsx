@@ -30,7 +30,25 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
   e?.response?.data?.message || e?.message || fallback;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
-const safeId = (u) => String(u?._id || u?.id || u?.userId || u?.email || "");
+
+// ✅ Extraction d'ID ultra-robuste (gère ObjectId, $oid, string…)
+const objIdToString = (v) => {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    if (v.$oid) return v.$oid;
+    if (typeof v.toHexString === "function") return v.toHexString();
+    if (typeof v.toString === "function") {
+      const s = v.toString();
+      const m = s.match(/[a-f0-9]{24}/i);
+      if (m) return m[0];
+      return s;
+    }
+  }
+  return "";
+};
+const uid = (u) =>
+  objIdToString(u?._id) || String(u?.id || u?.userId || u?.email || "");
 
 const PAGE_SIZE = 15;
 
@@ -212,7 +230,6 @@ export default function Utilisateurs() {
       });
 
       if (r1.status >= 200 && r1.status < 300) {
-        // formats possibles : {items,total} ou {admins} ou []
         const items =
           Array.isArray(r1.data?.items)
             ? r1.data.items
@@ -221,8 +238,9 @@ export default function Utilisateurs() {
             : Array.isArray(r1.data)
             ? r1.data
             : [];
-        list = items;
-        // déduction "hasMore"
+
+        // ✅ normalize _id → string
+        list = items.map((u) => ({ ...u, _id: uid(u) }));
         const total = Number(r1.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
@@ -244,7 +262,9 @@ export default function Utilisateurs() {
             : Array.isArray(r2.data)
             ? r2.data
             : [];
-        list = items;
+
+        // ✅ normalize _id → string
+        list = items.map((u) => ({ ...u, _id: uid(u) }));
         const total = Number(r2.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       }
@@ -328,9 +348,9 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      const id = safeId(editUser);
+      const id = uid(editUser);
       const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
-      const r = await axios.put(`${API_URL}/api/users/${id}`, payload, {
+      const r = await axios.put(`${API_URL}/api/users/${encodeURIComponent(id)}`, payload, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
         validateStatus: (s) => s >= 200 && s < 500,
@@ -349,13 +369,13 @@ export default function Utilisateurs() {
   };
 
   const toggleActive = async (u) => {
-    const id = safeId(u);
+    const id = uid(u);
     try {
       setRowBusyId(id);
       setRowBusyAction("toggle");
       const next = !(u.isActive !== false);
       const r = await axios.post(
-        `${API_URL}/api/users/${id}/toggle-active`,
+        `${API_URL}/api/users/${encodeURIComponent(id)}/toggle-active`,
         { active: next },
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -393,13 +413,13 @@ export default function Utilisateurs() {
       return;
     }
     const endpoint = mode === "renew" ? "renew" : "start";
-    const id = safeId(subUser);
+    const id = uid(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
       setRowBusyAction(`sub-${endpoint}`);
       const r = await axios.post(
-        `${API_URL}/api/subscriptions/${id}/${endpoint}`,
+        `${API_URL}/api/subscriptions/${encodeURIComponent(id)}/${endpoint}`,
         subPayload,
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -426,13 +446,13 @@ export default function Utilisateurs() {
 
   const cancelSub = async () => {
     if (!subUser) return;
-    const id = safeId(subUser);
+    const id = uid(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
       setRowBusyAction("sub-cancel");
       const r = await axios.post(
-        `${API_URL}/api/subscriptions/${id}/cancel`,
+        `${API_URL}/api/subscriptions/${encodeURIComponent(id)}/cancel`,
         {},
         {
           headers: { Authorization: `Bearer ${token}` },
@@ -456,12 +476,12 @@ export default function Utilisateurs() {
   };
 
   const openInvoices = async (u) => {
-    const id = safeId(u);
+    const id = uid(u);
     setInvUser(u);
     setShowInvoices(true);
     setLoadingInvoices(true);
     try {
-      const r = await axios.get(`${API_URL}/api/users/${id}/invoices`, {
+      const r = await axios.get(`${API_URL}/api/users/${encodeURIComponent(id)}/invoices`, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
         validateStatus: (s) => s >= 200 && s < 500,
@@ -790,7 +810,7 @@ export default function Utilisateurs() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const id = safeId(u);
+                      const id = uid(u);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
                       const subStatus =

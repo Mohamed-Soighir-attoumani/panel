@@ -136,7 +136,6 @@ export default function MonAbonnement() {
     };
   }, []);
 
-// Action manuelle "Rafraîchir"
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
@@ -211,9 +210,10 @@ export default function MonAbonnement() {
         y += 6;
       });
 
+      // ⚠️ Correction ici : pas de crochet superflu après head
       autoTableMod.default(doc, {
         startY: y + 4,
-        head: [["Champ", "Valeur"]]],
+        head: [["Champ", "Valeur"]],
         body: [
           ["Numéro", inv.number || inv.id || "—"],
           ["Montant", `${fmtMoney(Number(inv.amount) || 0)} ${inv.currency || ""}`],

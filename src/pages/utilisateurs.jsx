@@ -31,25 +31,32 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
 
-/* Convertit n’importe quel _id en string exploitable */
-const idFromAny = (u) => {
-  if (!u) return "";
-  if (u._idString) return String(u._idString);
-  const raw = u._id;
-  if (!raw) return String(u.id || u.userId || u.email || "");
-  if (typeof raw === "string") return raw;
-  if (typeof raw === "object") {
-    if (raw.$oid) return String(raw.$oid);
-    if (typeof raw.toHexString === "function") return raw.toHexString();
-    if (typeof raw.toString === "function") {
-      const s = raw.toString();
+// 🔐 extraction d'ObjectId sûre (string | {$oid} | ObjectId(...) | object)
+const objIdToString = (v) => {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    if (v.$oid) return v.$oid;
+    if (typeof v.toHexString === "function") return v.toHexString();
+    if (typeof v.toString === "function") {
+      const s = v.toString();
       const m = s.match(/[a-f0-9]{24}/i);
       if (m) return m[0];
       return s;
     }
   }
-  return String(u.id || u.userId || u.email || "");
+  return "";
 };
+// ID “universel” pour nos appels API
+const uid = (u) =>
+  String(
+    objIdToString(u?._id) ||
+    u?._idString ||             // support champ serveur
+    u?.id ||
+    u?.userId ||
+    u?.email ||
+    ""
+  );
 
 const PAGE_SIZE = 15;
 
@@ -184,7 +191,7 @@ export default function Utilisateurs() {
         throw new Error(r.data?.message || "Plans indisponibles");
       safeSet(setPlans)(Array.isArray(r.data?.plans) ? r.data.plans : []);
     } catch {
-      // fallback plans
+      // fallback plans si l'API n'existe pas encore
       safeSet(setPlans)([
         { id: "basic", name: "Basic", price: 9.9, currency: "EUR", period: "mois" },
         { id: "pro", name: "Pro", price: 19.9, currency: "EUR", period: "mois" },
@@ -213,7 +220,7 @@ export default function Utilisateurs() {
         communeId: communeId || undefined,
         status: statusFilter || undefined,
         sub: subFilter || undefined,
-        role: "admin",
+        role: "admin", // on force côté API
         page: currentPage,
         pageSize: PAGE_SIZE,
       };
@@ -221,7 +228,7 @@ export default function Utilisateurs() {
       let list = [];
       let hasMore = false;
 
-      // 1) on tente /api/admins (si une autre route répond), sinon fallback /api/users
+      // 1) route dédiée si dispo
       const r1 = await axios.get(`${API_URL}/api/admins`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
@@ -240,14 +247,12 @@ export default function Utilisateurs() {
             ? r1.data
             : [];
 
-        // Normalise ID
-        list = items.map((u) => ({
-          ...u,
-          _idString: u._idString ? String(u._idString) : undefined,
-        }));
+        // ✅ normalise _id pour les actions
+        list = items.map((u) => ({ ...u, _id: uid(u) }));
         const total = Number(r1.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
+        // 2) fallback -> /api/users
         const r2 = await axios.get(`${API_URL}/api/users`, {
           headers: { Authorization: `Bearer ${token}` },
           params,
@@ -265,10 +270,8 @@ export default function Utilisateurs() {
             : Array.isArray(r2.data)
             ? r2.data
             : [];
-        list = items.map((u) => ({
-          ...u,
-          _idString: u._idString ? String(u._idString) : undefined,
-        }));
+
+        list = items.map((u) => ({ ...u, _id: uid(u) }));
         const total = Number(r2.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       }
@@ -308,6 +311,7 @@ export default function Utilisateurs() {
     return Array.from(set.entries()).map(([id, name]) => ({ id, name }));
   }, [users]);
 
+  // derived
   const total = users.length;
 
   /* ----------------- Actions ------------------ */
@@ -351,8 +355,8 @@ export default function Utilisateurs() {
     }
     try {
       setDoingAction(true);
-      const id = idFromAny(editUser);
-      const payload = { ...editUser, role: "admin" }; // rester dans la liste
+      const id = uid(editUser);
+      const payload = { ...editUser, role: "admin" }; // éviter de sortir de la liste
       const r = await axios.put(`${API_URL}/api/users/${encodeURIComponent(id)}`, payload, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: 20000,
@@ -372,7 +376,7 @@ export default function Utilisateurs() {
   };
 
   const toggleActive = async (u) => {
-    const id = idFromAny(u);
+    const id = uid(u);
     try {
       setRowBusyId(id);
       setRowBusyAction("toggle");
@@ -416,7 +420,7 @@ export default function Utilisateurs() {
       return;
     }
     const endpoint = mode === "renew" ? "renew" : "start";
-    const id = idFromAny(subUser);
+    const id = uid(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -449,7 +453,7 @@ export default function Utilisateurs() {
 
   const cancelSub = async () => {
     if (!subUser) return;
-    const id = idFromAny(subUser);
+    const id = uid(subUser);
     try {
       setDoingAction(true);
       setRowBusyId(id);
@@ -479,7 +483,7 @@ export default function Utilisateurs() {
   };
 
   const openInvoices = async (u) => {
-    const id = idFromAny(u);
+    const id = uid(u);
     setInvUser(u);
     setShowInvoices(true);
     setLoadingInvoices(true);
@@ -813,7 +817,7 @@ export default function Utilisateurs() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const id = idFromAny(u);
+                      const id = uid(u);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
                       const subStatus =

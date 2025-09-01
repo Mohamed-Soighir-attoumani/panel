@@ -121,7 +121,6 @@ export default function MonAbonnement() {
     loadAll();
   }, [loadAll]);
 
-  // Auto-refresh quand l’onglet redevient actif (superadmin a pu agir)
   useEffect(() => {
     const onFocus = () => {
       if (document.visibilityState === "visible") {
@@ -183,7 +182,6 @@ export default function MonAbonnement() {
     .filter((i) => norm(i.status) === "paid")
     .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
 
-  // --------- Téléchargement PDF (lazy import) ---------
   const downloadInvoicePdf = async (inv) => {
     try {
       const jsPDFMod = await import("jspdf");
@@ -210,7 +208,6 @@ export default function MonAbonnement() {
         y += 6;
       });
 
-      // ⚠️ Correction ici : pas de crochet superflu après head
       autoTableMod.default(doc, {
         startY: y + 4,
         head: [["Champ", "Valeur"]],
@@ -271,7 +268,7 @@ export default function MonAbonnement() {
                   <div className="text-sm text-gray-800">{endLabel}</div>
                   {endDate && derivedStatus === "active" && (
                     <div className="text-xs text-gray-500 mt-0.5">
-                      {Math.max(0, Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)))} jour(s) restant(s)
+                      {Math.max(0, Math.ceil((endDate - new Date()) / (1000 * 60 * 60 * 24)))} jour(s) restant(s)
                     </div>
                   )}
                 </div>

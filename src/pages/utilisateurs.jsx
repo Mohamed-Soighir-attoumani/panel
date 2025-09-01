@@ -1,7 +1,6 @@
 // src/pages/utilisateurs.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
@@ -77,8 +76,6 @@ const Pill = ({ ok, children, title }) => (
 
 /* ----------------- Page ------------------ */
 export default function Utilisateurs() {
-  const navigate = useNavigate();
-
   // ⚠️ Affichage réservé au superadmin (gestion des admins)
   const token = useMemo(() => localStorage.getItem("token") || "", []);
   const mountedRef = useRef(true);
@@ -115,6 +112,8 @@ export default function Utilisateurs() {
     planId: "",
     periodMonths: 1,
     method: "card",
+    amount: "",
+    currency: "EUR",
   });
   const [doingAction, setDoingAction] = useState(false);
 
@@ -231,17 +230,15 @@ export default function Utilisateurs() {
       let hasMore = false;
 
       // 1) route dédiée si dispo
-      const r1 = await axios.get(`${API_URL}/api/admins-list`, {
-        // ⚠️ ASTUCE : si tu conserves GET /api/admins dans un autre fichier,
-        // on peut aussi appeler /api/users?role=admin. Ici j’utilise un alias propre si tu l’as.
+      const r1 = await axios.get(`${API_URL}/api/admins`, {
         headers: { Authorization: `Bearer ${token}` },
         params,
         timeout: 20000,
         signal: controller.signal,
         validateStatus: (s) => s >= 200 && s < 500,
-      }).catch(() => null);
+      });
 
-      if (r1 && r1.status >= 200 && r1.status < 300) {
+      if (r1.status >= 200 && r1.status < 300) {
         const items =
           Array.isArray(r1.data?.items)
             ? r1.data.items
@@ -420,19 +417,23 @@ export default function Utilisateurs() {
   };
 
   const openSub = (u) => {
+    // préremplir montant selon le plan[0] si dispo
+    const defaultPlan = plans[0] || {};
     setSubUser(u);
     setSubPayload({
-      planId: plans[0]?.id || "",
+      planId: defaultPlan?.id || "",
       periodMonths: 1,
       method: "card",
+      amount: defaultPlan?.price ?? "",
+      currency: defaultPlan?.currency || "EUR",
     });
     setShowSub(true);
   };
 
   const startOrRenew = async (mode = "start") => {
     if (!subUser) return;
-    if (!subPayload.planId) {
-      toast.error("Choisis un plan avant de continuer.");
+    if (!subPayload.planId && (subPayload.amount === "" || subPayload.amount === null)) {
+      toast.error("Sélectionne un plan ou saisis un montant.");
       return;
     }
     const id = idForApi(subUser);
@@ -445,9 +446,21 @@ export default function Utilisateurs() {
       setDoingAction(true);
       setRowBusyId(id);
       setRowBusyAction(`sub-${endpoint}`);
+
+      const payload = {
+        planId: subPayload.planId || undefined,
+        periodMonths: subPayload.periodMonths,
+        method: subPayload.method,
+        amount:
+          subPayload.amount === "" || subPayload.amount === null
+            ? undefined
+            : Number(subPayload.amount),
+        currency: subPayload.currency || "EUR",
+      };
+
       const r = await axios.post(
         `${API_URL}/api/subscriptions/${encodeURIComponent(id)}/${endpoint}`,
-        subPayload,
+        payload,
         {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 20000,
@@ -506,104 +519,37 @@ export default function Utilisateurs() {
     }
   };
 
-  // ---------- NEW: Reset password / Impersonate / Delete ----------
-  const resetPassword = async (u) => {
+  const openInvoices = async (u) => {
     const id = idForApi(u);
-    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
-
-    const newPassword = window.prompt(`Nouveau mot de passe pour ${u.email} :`, "");
-    if (!newPassword) return;
-
+    if (!id) {
+      toast.error("ID introuvable pour cet utilisateur.");
+      return;
+    }
+    setInvUser(u);
+    setShowInvoices(true);
+    setLoadingInvoices(true);
     try {
-      setRowBusyId(id);
-      setRowBusyAction("reset-pwd");
-      const r = await axios.post(
-        `${API_URL}/api/admins/${encodeURIComponent(id)}/reset-password`,
-        { newPassword },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 20000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        }
-      );
-      if (r.status >= 400) throw new Error(r.data?.message || "Échec reset mot de passe");
-      toast.success("Mot de passe réinitialisé ✅");
+      const r = await axios.get(`${API_URL}/api/users/${encodeURIComponent(id)}/invoices`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 20000,
+        validateStatus: (s) => s >= 200 && s < 500,
+      });
+      if (r.status >= 400)
+        throw new Error(r.data?.message || "Factures indisponibles");
+      const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
+      setInvoices(arr);
     } catch (e) {
-      toast.error(normalizeErr(e, "Erreur reset mot de passe"));
+      toast.error(
+        normalizeErr(
+          e,
+          "Erreur factures (vérifie que la route /api/users/:id/invoices existe)"
+        )
+      );
+      setInvoices([]);
     } finally {
-      setRowBusyId(null);
-      setRowBusyAction("");
+      setLoadingInvoices(false);
     }
   };
-
-  const impersonate = async (u) => {
-    const id = idForApi(u);
-    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
-    if (!window.confirm(`Utiliser la session de ${u.email} ?`)) return;
-
-    try {
-      setRowBusyId(id);
-      setRowBusyAction("impersonate");
-      const r = await axios.post(
-        `${API_URL}/api/admins/${encodeURIComponent(id)}/impersonate`,
-        {},
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 20000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        }
-      );
-      if (r.status >= 400) throw new Error(r.data?.message || "Échec de l’utilisation");
-      const t = r.data?.token;
-      if (!t) throw new Error("Réponse invalide (token manquant)");
-      localStorage.setItem("token", t);
-      localStorage.setItem(
-        "admin",
-        JSON.stringify({
-          communeName: r.data?.user?.communeName || "",
-          name: r.data?.user?.name || "",
-          email: r.data?.user?.email || "",
-          photo: r.data?.user?.photo || "",
-        })
-      );
-      toast.success(`Vous utilisez maintenant ${u.email}`);
-      navigate("/dashboard");
-    } catch (e) {
-      toast.error(normalizeErr(e, "Erreur utilisation du compte"));
-    } finally {
-      setRowBusyId(null);
-      setRowBusyAction("");
-    }
-  };
-
-  const deleteAdmin = async (u) => {
-    const id = idForApi(u);
-    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
-    if (!window.confirm(`Supprimer définitivement ${u.email} ?`)) return;
-
-    try {
-      setRowBusyId(id);
-      setRowBusyAction("delete");
-      const r = await axios.delete(
-        `${API_URL}/api/admins/${encodeURIComponent(id)}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 20000,
-          validateStatus: (s) => s >= 200 && s < 500,
-        }
-      );
-      if (r.status >= 400) throw new Error(r.data?.message || "Échec suppression");
-      toast.success("Administrateur supprimé ✅");
-      await sleep(150);
-      fetchAdmins({ page: 1 });
-    } catch (e) {
-      toast.error(normalizeErr(e, "Erreur suppression"));
-    } finally {
-      setRowBusyId(null);
-      setRowBusyAction("");
-    }
-  };
-  // ---------------------------------------------------------------
 
   /* ----------------- UI ------------------ */
 
@@ -915,7 +861,7 @@ export default function Utilisateurs() {
                         u.subscriptionStatus ||
                         (u.subscriptionEndAt ? "active" : "none");
                       const subEnd = u.subscriptionEndAt
-                        ? new Date(u.subscriptionEndAt).toLocaleDateString()
+                        ? new Date(u.subscriptionEndAt).toLocaleDateString("fr-FR")
                         : null;
 
                       const isRowBusy = rowBusyId === id;
@@ -1005,35 +951,6 @@ export default function Utilisateurs() {
                               >
                                 <CreditCard size={14} /> Factures
                               </button>
-
-                              {/* --- NEW actions --- */}
-                              <button
-                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
-                                onClick={() => resetPassword(u)}
-                                disabled={isRowBusy}
-                                title="Réinitialiser mot de passe"
-                              >
-                                Réinit. MDP
-                              </button>
-
-                              <button
-                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
-                                onClick={() => impersonate(u)}
-                                disabled={isRowBusy}
-                                title="Utiliser le compte"
-                              >
-                                Utiliser
-                              </button>
-
-                              <button
-                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
-                                onClick={() => deleteAdmin(u)}
-                                disabled={isRowBusy}
-                                title="Supprimer"
-                              >
-                                Supprimer
-                              </button>
-                              {/* --------------- */}
                             </div>
                           </td>
                         </tr>
@@ -1159,9 +1076,19 @@ export default function Utilisateurs() {
               <select
                 className="w-full border rounded px-3 py-2"
                 value={subPayload.planId}
-                onChange={(e) =>
-                  setSubPayload({ ...subPayload, planId: e.target.value })
-                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const p = plans.find((x) => x.id === val);
+                  setSubPayload((prev) => ({
+                    ...prev,
+                    planId: val,
+                    amount:
+                      prev.amount === "" || prev.amount === null
+                        ? (p?.price ?? "")
+                        : prev.amount,
+                    currency: p?.currency || prev.currency || "EUR",
+                  }));
+                }}
               >
                 {loadingPlans && <option>Chargement…</option>}
                 {!loadingPlans && plans.length === 0 && <option>Aucun plan</option>}
@@ -1200,6 +1127,32 @@ export default function Utilisateurs() {
                 <option value="cash">Espèces</option>
                 <option value="transfer">Virement</option>
               </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-600">Montant</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-full border rounded px-3 py-2"
+                placeholder="ex: 29.90"
+                value={subPayload.amount}
+                onChange={(e) =>
+                  setSubPayload({ ...subPayload, amount: e.target.value })
+                }
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-600">Devise</label>
+              <input
+                className="w-full border rounded px-3 py-2"
+                value={subPayload.currency}
+                onChange={(e) =>
+                  setSubPayload({ ...subPayload, currency: e.target.value.toUpperCase() })
+                }
+                maxLength={6}
+                placeholder="EUR"
+              />
             </div>
           </div>
 
@@ -1245,30 +1198,50 @@ export default function Utilisateurs() {
           ) : invoices.length === 0 ? (
             <div className="text-gray-500">Aucune facture.</div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {invoices.map((f, i) => (
                 <div
                   key={i}
-                  className="border rounded px-3 py-2 flex items-center justify-between"
+                  className="border rounded px-4 py-3"
                 >
-                  <div>
-                    <div className="text-sm font-medium text-gray-800">
-                      {f.number || f.id}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {f.amount} {f.currency} – {f.status} –{" "}
-                      {f.date ? new Date(f.date).toLocaleDateString() : ""}
-                    </div>
+                  <div className="text-sm font-semibold text-gray-800">
+                    {f.title || "Facture"}
                   </div>
+
+                  {/* Émetteur */}
+                  <div className="text-xs text-gray-600 mt-1">
+                    <div><strong>Émetteur :</strong> {f.issuer?.name || "Association Bellevue Dembeni"}</div>
+                    <div><strong>SIRET :</strong> {f.issuer?.siret || "913 987 905 00019"}</div>
+                    <div><strong>Adresse :</strong> {f.issuer?.address || "49, Rue Manga Chebane, 97660 Dembeni"}</div>
+                    <div><strong>Date de la facture :</strong> {f.invoiceDateFormatted || (f.date ? new Date(f.date).toLocaleDateString("fr-FR") : "")}</div>
+                    <div><strong>N° :</strong> {f.number || f.id}</div>
+                  </div>
+
+                  {/* Client */}
+                  <div className="text-xs text-gray-600 mt-2">
+                    <strong>Client :</strong>{" "}
+                    {f.customer?.name || invUser?.name || invUser?.email}{" "}
+                    {f.customer?.email ? `(${f.customer.email})` : invUser?.email ? `(${invUser.email})` : ""}
+                    {f.customer?.communeName ? ` – ${f.customer.communeName}` : ""}
+                  </div>
+
+                  {/* Montant */}
+                  <div className="text-sm text-gray-800 mt-2">
+                    <strong>Montant :</strong> {f.amount} {f.currency} – {f.status === "paid" ? "payée" : "à payer"}
+                  </div>
+
+                  {/* Lien éventuel */}
                   {f.url && (
-                    <a
-                      href={f.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 text-sm underline"
-                    >
-                      Voir
-                    </a>
+                    <div className="mt-2">
+                      <a
+                        href={f.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 text-sm underline"
+                      >
+                        Voir le PDF
+                      </a>
+                    </div>
                   )}
                 </div>
               ))}

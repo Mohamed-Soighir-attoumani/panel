@@ -31,18 +31,31 @@ const normalizeErr = (e, fallback = "Erreur inattendue") =>
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const norm = (v) => (v || "").toString().trim().toLowerCase();
 
-const extractHex24 = (s) => {
-  if (!s) return "";
-  const m = String(s).match(/[a-f0-9]{24}/i);
-  return m ? m[0] : "";
+const extractHex24Any = (v) => {
+  if (!v) return "";
+  if (typeof v === "object") {
+    if (v.$oid && /^[a-f0-9]{24}$/i.test(v.$oid)) return v.$oid;
+    try {
+      const m = JSON.stringify(v).match(/[a-f0-9]{24}/i);
+      if (m && /^[a-f0-9]{24}$/i.test(m[0])) return m[0];
+    } catch {}
+  }
+  const s = String(v);
+  const m = s.match(/[a-f0-9]{24}/i);
+  return m && /^[a-f0-9]{24}$/i.test(m[0]) ? m[0] : "";
 };
 
-// 👉 ID utilisé pour TOUTES les routes backend (toujours ObjectId si possible)
-const idForApi = (u) => {
-  if (u?._idString && extractHex24(u._idString)) return extractHex24(u._idString);
-  if (u?._id && extractHex24(u._id)) return extractHex24(u._id);
-  if (u?.id && extractHex24(u.id)) return extractHex24(u.id);
-  return "";
+// 👉 ID pour TOUTES les routes backend (toujours un 24-hex)
+const idForApi = (u) =>
+  extractHex24Any(u?._idString) ||
+  extractHex24Any(u?._id) ||
+  extractHex24Any(u?.id) ||
+  "";
+
+// Normalise l'objet utilisateur pour garantir _idString
+const normalizeUserRow = (u) => {
+  const hex = idForApi(u);
+  return { ...u, _idString: hex };
 };
 
 const PAGE_SIZE = 15;
@@ -233,10 +246,7 @@ export default function Utilisateurs() {
             ? r1.data
             : [];
 
-        list = items.map((u) => ({
-          ...u,
-          _idString: u._idString || (u._id ? String(u._id) : ""),
-        }));
+        list = items.map((u) => normalizeUserRow(u));
         const total = Number(r1.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       } else {
@@ -259,10 +269,7 @@ export default function Utilisateurs() {
             ? r2.data
             : [];
 
-        list = items.map((u) => ({
-          ...u,
-          _idString: u._idString || (u._id ? String(u._id) : ""),
-        }));
+        list = items.map((u) => normalizeUserRow(u));
         const total = Number(r2.data?.total || 0);
         hasMore = total ? currentPage * PAGE_SIZE < total : items.length === PAGE_SIZE;
       }
@@ -290,7 +297,7 @@ export default function Utilisateurs() {
     }
   }, [loadingMe, me, debouncedQ, communeId, statusFilter, subFilter, fetchAdmins, loadPlans]);
 
-  // communes list (à partir des admins filtrés)
+  // communes list
   const communes = useMemo(() => {
     const set = new Map();
     for (const u of users) {
@@ -828,8 +835,8 @@ export default function Utilisateurs() {
                   </thead>
                   <tbody>
                     {users.map((u) => {
-                      const key = idForApi(u) || u.email || Math.random().toString(36).slice(2);
                       const id = idForApi(u);
+                      const key = id || u.email || Math.random().toString(36).slice(2);
                       const commune = u.communeName || u.communeId || "—";
                       const active = !(u.isActive === false);
                       const subStatus =

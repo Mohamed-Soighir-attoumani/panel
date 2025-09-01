@@ -112,6 +112,8 @@ export default function Utilisateurs() {
     planId: "",
     periodMonths: 1,
     method: "card",
+    amount: "",
+    currency: "EUR",
   });
   const [doingAction, setDoingAction] = useState(false);
 
@@ -415,19 +417,23 @@ export default function Utilisateurs() {
   };
 
   const openSub = (u) => {
+    // préremplir montant selon le plan[0] si dispo
+    const defaultPlan = plans[0] || {};
     setSubUser(u);
     setSubPayload({
-      planId: plans[0]?.id || "",
+      planId: defaultPlan?.id || "",
       periodMonths: 1,
       method: "card",
+      amount: defaultPlan?.price ?? "",
+      currency: defaultPlan?.currency || "EUR",
     });
     setShowSub(true);
   };
 
   const startOrRenew = async (mode = "start") => {
     if (!subUser) return;
-    if (!subPayload.planId) {
-      toast.error("Choisis un plan avant de continuer.");
+    if (!subPayload.planId && (subPayload.amount === "" || subPayload.amount === null)) {
+      toast.error("Sélectionne un plan ou saisis un montant.");
       return;
     }
     const id = idForApi(subUser);
@@ -440,9 +446,22 @@ export default function Utilisateurs() {
       setDoingAction(true);
       setRowBusyId(id);
       setRowBusyAction(`sub-${endpoint}`);
+
+      const payload = {
+        planId: subPayload.planId || undefined,
+        periodMonths: subPayload.periodMonths,
+        method: subPayload.method,
+        // on envoie le montant si fourni
+        amount:
+          subPayload.amount === "" || subPayload.amount === null
+            ? undefined
+            : Number(subPayload.amount),
+        currency: subPayload.currency || "EUR",
+      };
+
       const r = await axios.post(
         `${API_URL}/api/subscriptions/${encodeURIComponent(id)}/${endpoint}`,
-        subPayload,
+        payload,
         {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 20000,
@@ -883,7 +902,7 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                rowBusyAction.startsWith("sub-") && (
+                                (rowBusyAction.startsWith("sub-")) && (
                                   <Loader2 className="animate-spin text-gray-400" size={14} />
                                 )}
                             </div>
@@ -1058,9 +1077,20 @@ export default function Utilisateurs() {
               <select
                 className="w-full border rounded px-3 py-2"
                 value={subPayload.planId}
-                onChange={(e) =>
-                  setSubPayload({ ...subPayload, planId: e.target.value })
-                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const p = plans.find((x) => x.id === val);
+                  setSubPayload((prev) => ({
+                    ...prev,
+                    planId: val,
+                    // si le plan a un prix et aucun montant n'a été saisi, on le suggère
+                    amount:
+                      prev.amount === "" || prev.amount === null
+                        ? (p?.price ?? "")
+                        : prev.amount,
+                    currency: p?.currency || prev.currency || "EUR",
+                  }));
+                }}
               >
                 {loadingPlans && <option>Chargement…</option>}
                 {!loadingPlans && plans.length === 0 && <option>Aucun plan</option>}
@@ -1086,6 +1116,7 @@ export default function Utilisateurs() {
                 }
               />
             </div>
+
             <div>
               <label className="text-xs text-gray-600">Méthode</label>
               <select
@@ -1099,6 +1130,34 @@ export default function Utilisateurs() {
                 <option value="cash">Espèces</option>
                 <option value="transfer">Virement</option>
               </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600">Montant</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="w-full border rounded px-3 py-2"
+                placeholder="ex: 29.90"
+                value={subPayload.amount}
+                onChange={(e) =>
+                  setSubPayload({ ...subPayload, amount: e.target.value })
+                }
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-gray-600">Devise</label>
+              <input
+                className="w-full border rounded px-3 py-2"
+                value={subPayload.currency}
+                onChange={(e) =>
+                  setSubPayload({ ...subPayload, currency: e.target.value.toUpperCase() })
+                }
+                maxLength={6}
+                placeholder="EUR"
+              />
             </div>
           </div>
 

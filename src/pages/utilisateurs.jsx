@@ -1,6 +1,7 @@
 // src/pages/utilisateurs.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
@@ -76,6 +77,8 @@ const Pill = ({ ok, children, title }) => (
 
 /* ----------------- Page ------------------ */
 export default function Utilisateurs() {
+  const navigate = useNavigate();
+
   // ⚠️ Affichage réservé au superadmin (gestion des admins)
   const token = useMemo(() => localStorage.getItem("token") || "", []);
   const mountedRef = useRef(true);
@@ -112,8 +115,6 @@ export default function Utilisateurs() {
     planId: "",
     periodMonths: 1,
     method: "card",
-    amount: "",
-    currency: "EUR",
   });
   const [doingAction, setDoingAction] = useState(false);
 
@@ -230,15 +231,17 @@ export default function Utilisateurs() {
       let hasMore = false;
 
       // 1) route dédiée si dispo
-      const r1 = await axios.get(`${API_URL}/api/admins`, {
+      const r1 = await axios.get(`${API_URL}/api/admins-list`, {
+        // ⚠️ ASTUCE : si tu conserves GET /api/admins dans un autre fichier,
+        // on peut aussi appeler /api/users?role=admin. Ici j’utilise un alias propre si tu l’as.
         headers: { Authorization: `Bearer ${token}` },
         params,
         timeout: 20000,
         signal: controller.signal,
         validateStatus: (s) => s >= 200 && s < 500,
-      });
+      }).catch(() => null);
 
-      if (r1.status >= 200 && r1.status < 300) {
+      if (r1 && r1.status >= 200 && r1.status < 300) {
         const items =
           Array.isArray(r1.data?.items)
             ? r1.data.items
@@ -417,23 +420,19 @@ export default function Utilisateurs() {
   };
 
   const openSub = (u) => {
-    // préremplir montant selon le plan[0] si dispo
-    const defaultPlan = plans[0] || {};
     setSubUser(u);
     setSubPayload({
-      planId: defaultPlan?.id || "",
+      planId: plans[0]?.id || "",
       periodMonths: 1,
       method: "card",
-      amount: defaultPlan?.price ?? "",
-      currency: defaultPlan?.currency || "EUR",
     });
     setShowSub(true);
   };
 
   const startOrRenew = async (mode = "start") => {
     if (!subUser) return;
-    if (!subPayload.planId && (subPayload.amount === "" || subPayload.amount === null)) {
-      toast.error("Sélectionne un plan ou saisis un montant.");
+    if (!subPayload.planId) {
+      toast.error("Choisis un plan avant de continuer.");
       return;
     }
     const id = idForApi(subUser);
@@ -446,22 +445,9 @@ export default function Utilisateurs() {
       setDoingAction(true);
       setRowBusyId(id);
       setRowBusyAction(`sub-${endpoint}`);
-
-      const payload = {
-        planId: subPayload.planId || undefined,
-        periodMonths: subPayload.periodMonths,
-        method: subPayload.method,
-        // on envoie le montant si fourni
-        amount:
-          subPayload.amount === "" || subPayload.amount === null
-            ? undefined
-            : Number(subPayload.amount),
-        currency: subPayload.currency || "EUR",
-      };
-
       const r = await axios.post(
         `${API_URL}/api/subscriptions/${encodeURIComponent(id)}/${endpoint}`,
-        payload,
+        subPayload,
         {
           headers: { Authorization: `Bearer ${token}` },
           timeout: 20000,
@@ -520,37 +506,104 @@ export default function Utilisateurs() {
     }
   };
 
-  const openInvoices = async (u) => {
+  // ---------- NEW: Reset password / Impersonate / Delete ----------
+  const resetPassword = async (u) => {
     const id = idForApi(u);
-    if (!id) {
-      toast.error("ID introuvable pour cet utilisateur.");
-      return;
-    }
-    setInvUser(u);
-    setShowInvoices(true);
-    setLoadingInvoices(true);
+    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
+
+    const newPassword = window.prompt(`Nouveau mot de passe pour ${u.email} :`, "");
+    if (!newPassword) return;
+
     try {
-      const r = await axios.get(`${API_URL}/api/users/${encodeURIComponent(id)}/invoices`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
-      if (r.status >= 400)
-        throw new Error(r.data?.message || "Factures indisponibles");
-      const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
-      setInvoices(arr);
-    } catch (e) {
-      toast.error(
-        normalizeErr(
-          e,
-          "Erreur factures (vérifie que la route /api/users/:id/invoices existe)"
-        )
+      setRowBusyId(id);
+      setRowBusyAction("reset-pwd");
+      const r = await axios.post(
+        `${API_URL}/api/admins/${encodeURIComponent(id)}/reset-password`,
+        { newPassword },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 20000,
+          validateStatus: (s) => s >= 200 && s < 500,
+        }
       );
-      setInvoices([]);
+      if (r.status >= 400) throw new Error(r.data?.message || "Échec reset mot de passe");
+      toast.success("Mot de passe réinitialisé ✅");
+    } catch (e) {
+      toast.error(normalizeErr(e, "Erreur reset mot de passe"));
     } finally {
-      setLoadingInvoices(false);
+      setRowBusyId(null);
+      setRowBusyAction("");
     }
   };
+
+  const impersonate = async (u) => {
+    const id = idForApi(u);
+    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
+    if (!window.confirm(`Utiliser la session de ${u.email} ?`)) return;
+
+    try {
+      setRowBusyId(id);
+      setRowBusyAction("impersonate");
+      const r = await axios.post(
+        `${API_URL}/api/admins/${encodeURIComponent(id)}/impersonate`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 20000,
+          validateStatus: (s) => s >= 200 && s < 500,
+        }
+      );
+      if (r.status >= 400) throw new Error(r.data?.message || "Échec de l’utilisation");
+      const t = r.data?.token;
+      if (!t) throw new Error("Réponse invalide (token manquant)");
+      localStorage.setItem("token", t);
+      localStorage.setItem(
+        "admin",
+        JSON.stringify({
+          communeName: r.data?.user?.communeName || "",
+          name: r.data?.user?.name || "",
+          email: r.data?.user?.email || "",
+          photo: r.data?.user?.photo || "",
+        })
+      );
+      toast.success(`Vous utilisez maintenant ${u.email}`);
+      navigate("/dashboard");
+    } catch (e) {
+      toast.error(normalizeErr(e, "Erreur utilisation du compte"));
+    } finally {
+      setRowBusyId(null);
+      setRowBusyAction("");
+    }
+  };
+
+  const deleteAdmin = async (u) => {
+    const id = idForApi(u);
+    if (!id) return toast.error("ID introuvable pour cet utilisateur.");
+    if (!window.confirm(`Supprimer définitivement ${u.email} ?`)) return;
+
+    try {
+      setRowBusyId(id);
+      setRowBusyAction("delete");
+      const r = await axios.delete(
+        `${API_URL}/api/admins/${encodeURIComponent(id)}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 20000,
+          validateStatus: (s) => s >= 200 && s < 500,
+        }
+      );
+      if (r.status >= 400) throw new Error(r.data?.message || "Échec suppression");
+      toast.success("Administrateur supprimé ✅");
+      await sleep(150);
+      fetchAdmins({ page: 1 });
+    } catch (e) {
+      toast.error(normalizeErr(e, "Erreur suppression"));
+    } finally {
+      setRowBusyId(null);
+      setRowBusyAction("");
+    }
+  };
+  // ---------------------------------------------------------------
 
   /* ----------------- UI ------------------ */
 
@@ -902,7 +955,7 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                (rowBusyAction.startsWith("sub-")) && (
+                                rowBusyAction.startsWith("sub-") && (
                                   <Loader2 className="animate-spin text-gray-400" size={14} />
                                 )}
                             </div>
@@ -952,6 +1005,35 @@ export default function Utilisateurs() {
                               >
                                 <CreditCard size={14} /> Factures
                               </button>
+
+                              {/* --- NEW actions --- */}
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                                onClick={() => resetPassword(u)}
+                                disabled={isRowBusy}
+                                title="Réinitialiser mot de passe"
+                              >
+                                Réinit. MDP
+                              </button>
+
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                                onClick={() => impersonate(u)}
+                                disabled={isRowBusy}
+                                title="Utiliser le compte"
+                              >
+                                Utiliser
+                              </button>
+
+                              <button
+                                className="px-2 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
+                                onClick={() => deleteAdmin(u)}
+                                disabled={isRowBusy}
+                                title="Supprimer"
+                              >
+                                Supprimer
+                              </button>
+                              {/* --------------- */}
                             </div>
                           </td>
                         </tr>
@@ -1077,20 +1159,9 @@ export default function Utilisateurs() {
               <select
                 className="w-full border rounded px-3 py-2"
                 value={subPayload.planId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const p = plans.find((x) => x.id === val);
-                  setSubPayload((prev) => ({
-                    ...prev,
-                    planId: val,
-                    // si le plan a un prix et aucun montant n'a été saisi, on le suggère
-                    amount:
-                      prev.amount === "" || prev.amount === null
-                        ? (p?.price ?? "")
-                        : prev.amount,
-                    currency: p?.currency || prev.currency || "EUR",
-                  }));
-                }}
+                onChange={(e) =>
+                  setSubPayload({ ...subPayload, planId: e.target.value })
+                }
               >
                 {loadingPlans && <option>Chargement…</option>}
                 {!loadingPlans && plans.length === 0 && <option>Aucun plan</option>}
@@ -1116,7 +1187,6 @@ export default function Utilisateurs() {
                 }
               />
             </div>
-
             <div>
               <label className="text-xs text-gray-600">Méthode</label>
               <select
@@ -1130,34 +1200,6 @@ export default function Utilisateurs() {
                 <option value="cash">Espèces</option>
                 <option value="transfer">Virement</option>
               </select>
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Montant</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                className="w-full border rounded px-3 py-2"
-                placeholder="ex: 29.90"
-                value={subPayload.amount}
-                onChange={(e) =>
-                  setSubPayload({ ...subPayload, amount: e.target.value })
-                }
-              />
-            </div>
-
-            <div>
-              <label className="text-xs text-gray-600">Devise</label>
-              <input
-                className="w-full border rounded px-3 py-2"
-                value={subPayload.currency}
-                onChange={(e) =>
-                  setSubPayload({ ...subPayload, currency: e.target.value.toUpperCase() })
-                }
-                maxLength={6}
-                placeholder="EUR"
-              />
             </div>
           </div>
 

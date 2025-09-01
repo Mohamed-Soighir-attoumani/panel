@@ -883,7 +883,7 @@ export default function Utilisateurs() {
                                 </span>
                               )}
                               {isRowBusy &&
-                                (rowBusyAction.startsWith("sub-")) && (
+                                rowBusyAction.startsWith("sub-") && (
                                   <Loader2 className="animate-spin text-gray-400" size={14} />
                                 )}
                             </div>

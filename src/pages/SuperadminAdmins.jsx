@@ -1,22 +1,45 @@
 // src/pages/SuperadminAdmins.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 const API_URL = process.env.REACT_APP_API_URL || "";
 
-// Utils
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+/* ---------------- Utils ---------------- */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const normalizeErr = (e, fallback = "Erreur inattendue") =>
   e?.response?.data?.message || e?.message || fallback;
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Toujours lire le token depuis localStorage pour éviter l’obsolescence
+const getToken = () => (localStorage.getItem("token") || "").trim();
+
+// axios instance + interceptor => injecte le token frais à chaque requête
+const api = axios.create({
+  baseURL: API_URL,
+  timeout: 20000,
+  validateStatus: (s) => s >= 200 && s < 500,
+});
+
+api.interceptors.request.use((config) => {
+  const t = getToken();
+  if (t) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${t}`;
+    // Fallbacks si jamais un proxy filtre Authorization
+    config.headers["X-Access-Token"] = t;
+    config.headers["X-Token"] = t;
+    config.headers["X-Requested-With"] = "XMLHttpRequest";
+  }
+  return config;
+});
+
+/* -------------- Component ---------------- */
 export default function SuperadminAdmins() {
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
+  // pas de useMemo ici pour le token — on le lit dans l’interceptor
   const mountedRef = useRef(true);
-  const cancelRef = useRef(null); // pour annuler les listes en rafale
+  const cancelRef = useRef(null);
 
   const [me, setMe] = useState(null);
   const [loadingMe, setLoadingMe] = useState(true);
@@ -29,7 +52,7 @@ export default function SuperadminAdmins() {
 
   // tri/pagination
   const [sortKey, setSortKey] = useState("email");
-  const [sortDir, setSortDir] = useState("asc"); // 'asc' | 'desc'
+  const [sortDir, setSortDir] = useState("asc");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
@@ -43,7 +66,6 @@ export default function SuperadminAdmins() {
   });
   const [creating, setCreating] = useState(false);
 
-  // helper setState safe
   const safeSet = (setter) => (...args) => {
     if (!mountedRef.current) return;
     setter(...args);
@@ -51,16 +73,19 @@ export default function SuperadminAdmins() {
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      if (cancelRef.current) cancelRef.current.abort();
+    };
   }, []);
 
-  // Debounce du filtre
+  // debounce filtre
   useEffect(() => {
     const t = setTimeout(() => setDebouncedFilter(communeFilter.trim()), 400);
     return () => clearTimeout(t);
   }, [communeFilter]);
 
-  // Charger /api/me
+  // charge /api/me avec axios instance (token toujours frais)
   useEffect(() => {
     (async () => {
       try {
@@ -69,15 +94,19 @@ export default function SuperadminAdmins() {
           safeSet(setLoadingMe)(false);
           return;
         }
-        if (!token) {
+        const t = getToken();
+        if (!t) {
           toast.error("Non connecté");
           window.location.href = "/login";
           return;
         }
-        const res = await axios.get(`${API_URL}/api/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 15000,
-        });
+        const res = await api.get(`/api/me`);
+        if (res.status === 401) {
+          toast.error(res.data?.message || "Session expirée");
+          localStorage.removeItem("token");
+          setTimeout(() => (window.location.href = "/login"), 600);
+          return;
+        }
         safeSet(setMe)(res.data?.user || null);
       } catch (e) {
         toast.error(normalizeErr(e, "Erreur /api/me"));
@@ -85,69 +114,60 @@ export default function SuperadminAdmins() {
         safeSet(setLoadingMe)(false);
       }
     })();
-  }, [token]);
+  }, []);
 
-  // Liste des admins — **useCallback** pour stabilité
-  const fetchAdmins = useCallback(async (q = "") => {
-    if (!API_URL || !token) return;
+  // Liste des admins
+  const fetchAdmins = useCallback(
+    async (communeId = "") => {
+      if (!API_URL) return;
 
-    // Annule la requête précédente si elle est en cours
-    if (cancelRef.current) {
-      cancelRef.current.abort();
-    }
-    const controller = new AbortController();
-    cancelRef.current = controller;
+      // annule la précédente si en cours
+      if (cancelRef.current) cancelRef.current.abort();
+      const controller = new AbortController();
+      cancelRef.current = controller;
 
-    safeSet(setLoadingList)(true);
-    try {
-      const url = q
-        ? `${API_URL}/api/admins?communeId=${encodeURIComponent(q)}`
-        : `${API_URL}/api/admins`;
+      safeSet(setLoadingList)(true);
+      try {
+        const params = {};
+        if (communeId) params.communeId = communeId;
 
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        signal: controller.signal,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+        const res = await api.get(`/api/admins`, {
+          params,
+          signal: controller.signal,
+        });
 
-      if (res.status === 401) {
-        toast.error("Session expirée. Veuillez vous reconnecter.");
-        localStorage.removeItem("token");
-        setTimeout(() => (window.location.href = "/login"), 500);
-        return;
+        if (res.status === 401) {
+          toast.error(res.data?.message || "Session expirée. Veuillez vous reconnecter.");
+          localStorage.removeItem("token");
+          setTimeout(() => (window.location.href = "/login"), 500);
+          return;
+        }
+        if (res.status === 403) throw new Error(res.data?.message || "Accès interdit");
+        if (res.status >= 400) throw new Error(res.data?.message || `Erreur API (${res.status})`);
+
+        const list = Array.isArray(res.data?.items)
+          ? res.data.items
+          : Array.isArray(res.data?.admins)
+          ? res.data.admins
+          : [];
+
+        safeSet(setAdmins)(list);
+        safeSet(setPage)(1);
+      } catch (e) {
+        if (e.name === "CanceledError" || e.message === "canceled") return;
+        toast.error(normalizeErr(e, "Erreur /api/admins"));
+      } finally {
+        safeSet(setLoadingList)(false);
       }
-      if (res.status === 403) {
-        throw new Error(res.data?.message || "Accès interdit");
-      }
-      if (res.status >= 400) {
-        throw new Error(res.data?.message || `Erreur API (${res.status})`);
-      }
+    },
+    []
+  );
 
-      // 👇 Correction : accepte {items} (nouvelle route) ou {admins} (ancienne)
-      const list =
-        Array.isArray(res.data?.items) ? res.data.items :
-        Array.isArray(res.data?.admins) ? res.data.admins :
-        [];
-
-      safeSet(setAdmins)(list);
-      safeSet(setPage)(1);
-    } catch (e) {
-      if (e.name === "CanceledError" || e.message === "canceled") return;
-      toast.error(normalizeErr(e, "Erreur /api/admins"));
-    } finally {
-      safeSet(setLoadingList)(false);
-    }
-  }, [token]);
-
-  // Charge la liste si superadmin — **dépend** de fetchAdmins
   useEffect(() => {
-    if (me?.role === "superadmin") {
-      fetchAdmins(debouncedFilter);
-    }
+    if (me?.role === "superadmin") fetchAdmins(debouncedFilter);
   }, [me?.role, debouncedFilter, fetchAdmins]);
 
-  // Création d’un admin
+  // Création admin
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!form.email || !form.password) {
@@ -160,14 +180,9 @@ export default function SuperadminAdmins() {
     }
     try {
       safeSet(setCreating)(true);
-      const res = await axios.post(`${API_URL}/api/admins`, form, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+      const res = await api.post(`/api/admins`, form);
       if (res.status >= 400) throw new Error(res.data?.message || "Création refusée");
       toast.success("Administrateur créé ✅");
-
       safeSet(setForm)({
         email: "",
         password: "",
@@ -186,8 +201,12 @@ export default function SuperadminAdmins() {
   };
 
   // Actions superadmin
-  const handleDelete = async (id, role, email) => {
-    if (me && (id === (me._id || me.id))) {
+  const pickId = (u) => String(u?._id || u?.id || u?._idString || "");
+
+  const handleDelete = async (idOrObj, role, email) => {
+    const id = typeof idOrObj === "string" ? idOrObj : pickId(idOrObj);
+    if (!id) return toast.error("ID introuvable");
+    if (me && id === String(me._id || me.id)) {
       toast.warn("Vous ne pouvez pas vous supprimer vous-même.");
       return;
     }
@@ -198,11 +217,7 @@ export default function SuperadminAdmins() {
     if (!window.confirm(`Supprimer l’administrateur ${email || id} ?`)) return;
 
     try {
-      const res = await axios.delete(`${API_URL}/api/admins/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
+      const res = await api.delete(`/api/admins/${encodeURIComponent(id)}`);
       if (res.status >= 400) throw new Error(res.data?.message || "Suppression refusée");
       toast.success("Administrateur supprimé ✅");
       await sleep(150);
@@ -212,36 +227,38 @@ export default function SuperadminAdmins() {
     }
   };
 
-  const handleReset = async (id) => {
+  const handleReset = async (idOrObj) => {
+    const id = typeof idOrObj === "string" ? idOrObj : pickId(idOrObj);
+    if (!id) return toast.error("ID introuvable");
     const np = window.prompt("Nouveau mot de passe ?");
     if (!np) return;
     try {
-      const res = await axios.post(`${API_URL}/api/admins/${id}/reset-password`, { newPassword: np }, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
+      const res = await api.post(`/api/admins/${encodeURIComponent(id)}/reset-password`, {
+        newPassword: np,
       });
-      if (res.status >= 400) throw new Error(res.data?.message || "Réinitialisation refusée");
+      if (res.status >= 400)
+        throw new Error(res.data?.message || "Réinitialisation refusée");
       toast.success("Mot de passe réinitialisé ✅");
     } catch (e) {
       toast.error(normalizeErr(e, "Erreur reset password"));
     }
   };
 
-  const handleImpersonate = async (id) => {
+  const handleImpersonate = async (idOrObj) => {
+    const id = typeof idOrObj === "string" ? idOrObj : pickId(idOrObj);
+    if (!id) return toast.error("ID introuvable");
     try {
-      const res = await axios.post(`${API_URL}/api/admins/${id}/impersonate`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 20000,
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
-      if (res.status >= 400) throw new Error(res.data?.message || "Impersonation refusée");
+      const res = await api.post(`/api/admins/${encodeURIComponent(id)}/impersonate`, {});
+      if (res.status >= 400)
+        throw new Error(res.data?.message || "Impersonation refusée");
 
       const impersonatedToken = res.data?.token;
       if (!impersonatedToken) throw new Error("Token d’impersonation manquant");
 
-      localStorage.setItem("token_orig", token);
+      const current = getToken();
+      if (current) localStorage.setItem("token_orig", current);
       localStorage.setItem("token", impersonatedToken);
+
       toast.success("Vous utilisez maintenant ce compte (impersonation).");
       setTimeout(() => window.location.assign("/dashboard"), 300);
     } catch (e) {
@@ -252,19 +269,20 @@ export default function SuperadminAdmins() {
   // Export CSV
   const exportCSV = () => {
     const rows = [
-      ["email", "name", "role", "communeId", "communeName", "photo"],
-      ...admins.map(a => [
+      ["email", "name", "role", "communeId", "communeName", "photo", "id"],
+      ...admins.map((a) => [
         a.email || "",
         a.name || "",
         a.role || "",
         a.communeId || "",
         a.communeName || "",
         a.photo || "",
+        pickId(a),
       ]),
     ];
-    const csv = rows.map(r =>
-      r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")
-    ).join("\n");
+    const csv = rows
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -289,14 +307,14 @@ export default function SuperadminAdmins() {
 
   const setSort = (key) => {
     if (sortKey === key) {
-      setSortDir(d => (d === "asc" ? "desc" : "asc"));
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
       setSortDir("asc");
     }
   };
 
-  // --------- rendu ----------
+  /* ---------------- UI ---------------- */
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
       <ToastContainer />
@@ -321,7 +339,9 @@ export default function SuperadminAdmins() {
         <div className="min-h-[60vh] flex items-center justify-center">
           <div className="max-w-md w-full bg-white shadow-md rounded-lg p-6 text-center">
             <h2 className="text-xl font-semibold text-gray-800 mb-2">Accès restreint</h2>
-            <p className="text-gray-600">Cette page est réservée au <strong>superadmin</strong>.</p>
+            <p className="text-gray-600">
+              Cette page est réservée au <strong>superadmin</strong>.
+            </p>
           </div>
         </div>
       ) : (
@@ -336,7 +356,10 @@ export default function SuperadminAdmins() {
           {/* Formulaire de création */}
           <div className="bg-white shadow-md rounded-lg p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">Créer un administrateur</h2>
-            <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <form
+              onSubmit={handleCreate}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
               <div>
                 <label className="block text-sm font-medium text-gray-700">Email *</label>
                 <input
@@ -421,7 +444,16 @@ export default function SuperadminAdmins() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setForm({ email: "", password: "", name: "", communeId: "", communeName: "", photo: "" })}
+                  onClick={() =>
+                    setForm({
+                      email: "",
+                      password: "",
+                      name: "",
+                      communeId: "",
+                      communeName: "",
+                      photo: "",
+                    })
+                  }
                   className="py-2 px-4 rounded border border-gray-300 hover:bg-gray-50 transition"
                 >
                   Réinitialiser le formulaire
@@ -497,9 +529,9 @@ export default function SuperadminAdmins() {
                     </thead>
                     <tbody>
                       {slice.map((a) => {
-                        const id = a._id || a.id;
+                        const id = String(a._id || a.id || a._idString || "");
                         const isTargetSuper = String(a.role || "").toLowerCase() === "superadmin";
-                        const isSelf = me && (id === (me._id || me.id));
+                        const isSelf = me && id === String(me._id || me.id);
                         return (
                           <tr key={id} className="hover:bg-gray-50">
                             <td className="px-4 py-2 border-b text-sm">{a.email}</td>
@@ -509,7 +541,11 @@ export default function SuperadminAdmins() {
                             <td className="px-4 py-2 border-b text-sm">{a.communeName || "-"}</td>
                             <td className="px-4 py-2 border-b text-sm">
                               {a.photo ? (
-                                <img src={a.photo} alt="avatar" className="h-8 w-8 rounded-full object-cover" />
+                                <img
+                                  src={a.photo}
+                                  alt="avatar"
+                                  className="h-8 w-8 rounded-full object-cover"
+                                />
                               ) : (
                                 <span className="text-gray-400">—</span>
                               )}
@@ -553,14 +589,14 @@ export default function SuperadminAdmins() {
                   </p>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
                       className="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
                       disabled={currentPage <= 1}
                     >
                       « Préc.
                     </button>
                     <button
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                       className="px-3 py-1 border rounded hover:bg-gray-50 disabled:opacity-50"
                       disabled={currentPage >= totalPages}
                     >

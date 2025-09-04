@@ -83,12 +83,18 @@ const IncidentPage = () => {
   // 🔽 communes list pour le superadmin
   const [communes, setCommunes] = useState([]);
   const [selectedCommuneId, setSelectedCommuneId] = useState(
-    (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || ""
+    (typeof window !== "undefined" &&
+      localStorage.getItem("selectedCommuneId")) ||
+      ""
   );
 
   const lastIncidentIdRef = useRef(null);
+
+  // --- Gestion du son ---
+  const SOUND_URL = `${window.location.origin}/sounds/notification.mp3`;
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
+  const pendingPlayRef = useRef(false);
 
   // charge /api/me pour connaître le rôle/commune
   useEffect(() => {
@@ -123,7 +129,6 @@ const IncidentPage = () => {
             : Array.isArray(r.data?.items)
             ? r.data.items
             : [];
-          // set unique communes (id + name)
           const map = new Map();
           for (const a of list) {
             const id = (a.communeId || "").trim();
@@ -136,40 +141,89 @@ const IncidentPage = () => {
             .sort((a, b) => a.name.localeCompare(b.name, "fr"));
           setCommunes(arr);
         } catch (e) {
-          console.warn("Impossible de charger la liste des communes:", e?.message || e);
+          console.warn(
+            "Impossible de charger la liste des communes:",
+            e?.message || e
+          );
           setCommunes([]);
         }
       })();
     }
   }, [loadingMe, me]);
 
-  // autoriser le son après une interaction utilisateur (règles navigateur)
+  // Init audio
   useEffect(() => {
-    audioRef.current = new Audio("/sounds/notification.mp3");
-    audioRef.current.load();
+    audioRef.current = new Audio(SOUND_URL);
+    audioRef.current.preload = "auto";
 
-    const handleUserInteraction = () => {
-      isAudioAllowedRef.current = true;
-      document.removeEventListener("click", handleUserInteraction);
+    const unlock = async () => {
+      try {
+        await audioRef.current.play();
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        isAudioAllowedRef.current = true;
+
+        if (pendingPlayRef.current && document.visibilityState === "visible") {
+          pendingPlayRef.current = false;
+          await audioRef.current.play().catch(() => {});
+        }
+      } catch (e) {
+        console.warn("Audio unlock failed:", e?.message || e);
+      } finally {
+        document.removeEventListener("click", unlock);
+        document.removeEventListener("keydown", unlock);
+        document.removeEventListener("touchstart", unlock);
+      }
     };
 
-    document.addEventListener("click", handleUserInteraction);
+    document.addEventListener("click", unlock, { once: true });
+    document.addEventListener("keydown", unlock, { once: true });
+    document.addEventListener("touchstart", unlock, { once: true });
+
+    const onVisible = async () => {
+      if (
+        isAudioAllowedRef.current &&
+        pendingPlayRef.current &&
+        document.visibilityState === "visible"
+      ) {
+        pendingPlayRef.current = false;
+        try {
+          await audioRef.current.play();
+        } catch {}
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
-      document.removeEventListener("click", handleUserInteraction);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
-  const playNotificationSound = () => {
-    if (audioRef.current && isAudioAllowedRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current
-        .play()
-        .catch((err) => console.error("Erreur lecture son :", err));
+  const playNotificationSound = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (!isAudioAllowedRef.current) {
+      pendingPlayRef.current = true;
+      return;
+    }
+
+    if (document.visibilityState !== "visible") {
+      pendingPlayRef.current = true;
+      return;
+    }
+
+    try {
+      audio.currentTime = 0;
+      await audio.play();
+    } catch (err) {
+      console.error("Erreur lecture son :", err);
+      pendingPlayRef.current = true;
     }
   };
 
   const fetchIncidents = useCallback(async () => {
-    if (loadingMe) return; // attend /api/me
+    if (loadingMe) return;
     try {
       const headers = buildHeaders(me, selectedCommuneId);
       const params = {};
@@ -190,14 +244,19 @@ const IncidentPage = () => {
       }
 
       if (data.length > 0) {
-        const newestId = data[0]._id;
+        const newestId = data[0]?._id;
         if (
           lastIncidentIdRef.current &&
+          newestId &&
           newestId !== lastIncidentIdRef.current
         ) {
           playNotificationSound();
         }
-        lastIncidentIdRef.current = newestId;
+        if (!lastIncidentIdRef.current && newestId) {
+          lastIncidentIdRef.current = newestId;
+        } else if (newestId && newestId !== lastIncidentIdRef.current) {
+          lastIncidentIdRef.current = newestId;
+        }
       }
 
       setIncidents(data);

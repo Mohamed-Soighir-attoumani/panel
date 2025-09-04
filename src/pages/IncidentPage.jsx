@@ -88,10 +88,14 @@ const IncidentPage = () => {
       ""
   );
 
-  const lastIncidentIdRef = useRef(null);
+  // --- Détection "vrai nouvel incident" (PAS sur suppression/tri) ---
+  const prevIdsRef = useRef(new Set());   // IDs vus au dernier fetch
+  const isFirstLoadRef = useRef(true);    // pas de son au 1er chargement
 
   // --- Gestion du son ---
-  const SOUND_URL = `${window.location.origin}/sounds/notification.mp3`;
+  const SOUND_URL =
+    (typeof window !== "undefined" ? window.location.origin : "") +
+    "/sounds/notification.mp3";
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
   const pendingPlayRef = useRef(false);
@@ -151,7 +155,7 @@ const IncidentPage = () => {
     }
   }, [loadingMe, me]);
 
-  // Init audio
+  // Init audio + déverrouillage autoplay (lecture/pause sur 1ère interaction)
   useEffect(() => {
     audioRef.current = new Audio(SOUND_URL);
     audioRef.current.preload = "auto";
@@ -235,29 +239,31 @@ const IncidentPage = () => {
       });
 
       let data = Array.isArray(response.data) ? response.data : [];
+      // Tri : plus récent en premier
       data = data.sort(
         (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
       );
 
+      // Filtre statut si demandé
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
-      if (data.length > 0) {
-        const newestId = data[0]?._id;
-        if (
-          lastIncidentIdRef.current &&
-          newestId &&
-          newestId !== lastIncidentIdRef.current
-        ) {
-          playNotificationSound();
-        }
-        if (!lastIncidentIdRef.current && newestId) {
-          lastIncidentIdRef.current = newestId;
-        } else if (newestId && newestId !== lastIncidentIdRef.current) {
-          lastIncidentIdRef.current = newestId;
+      // --- Détection "vrai nouvel incident" par IDs jamais vus ---
+      const newIds = data.map((it) => it?._id).filter(Boolean);
+      let hasNew = false;
+      for (const id of newIds) {
+        if (!prevIdsRef.current.has(id)) {
+          hasNew = true;
+          break;
         }
       }
+      if (!isFirstLoadRef.current && hasNew) {
+        playNotificationSound();
+      }
+      // maj set des IDs vus pour prochain tick
+      prevIdsRef.current = new Set(newIds);
+      if (isFirstLoadRef.current) isFirstLoadRef.current = false;
 
       setIncidents(data);
       setLoading(false);

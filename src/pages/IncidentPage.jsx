@@ -5,6 +5,10 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { API_URL } from "../config"; // 🔗 backend
 
+// ===== Normalisation base API (évite /api/api) =====
+const BASE_API = API_URL.endsWith("/api") ? API_URL : `${API_URL}/api`;
+
+// ====== Cartes ======
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
     center={[latitude, longitude]}
@@ -21,7 +25,10 @@ const IncidentMap = ({ latitude, longitude }) => (
 
 const GlobalIncidentMap = ({ incidents }) => {
   if (!incidents || incidents.length === 0) return null;
-  const center = [incidents[0].latitude || 0, incidents[0].longitude || 0];
+  const center = [
+    incidents[0].latitude || 0,
+    incidents[0].longitude || 0,
+  ];
 
   return (
     <MapContainer
@@ -50,21 +57,29 @@ const GlobalIncidentMap = ({ incidents }) => {
 };
 
 // === helper headers ===
-function buildHeaders(me, selectedCommuneId) {
+function buildHeaders(me) {
   const token =
     (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-
-  // Admin => impose sa commune
-  if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = me.communeId;
-  }
-  // Superadmin => applique le filtre s'il est choisi
-  if (me?.role === "superadmin" && selectedCommuneId) {
-    headers["x-commune-id"] = selectedCommuneId;
-  }
   return headers;
+}
+
+// === helper params (communeId côté requêtes) ===
+function buildParams(me, selectedCommuneId, extra = {}) {
+  const params = { ...extra };
+
+  // Admin: force sa commune
+  if (me?.role === "admin" && me?.communeId) {
+    params.communeId = me.communeId;
+  }
+
+  // Superadmin: applique le filtre si choisi
+  if (me?.role === "superadmin" && selectedCommuneId) {
+    params.communeId = selectedCommuneId;
+  }
+
+  return params;
 }
 
 const IncidentPage = () => {
@@ -77,6 +92,7 @@ const IncidentPage = () => {
 
   const [editIncidentId, setEditIncidentId] = useState(null);
   const [editedIncident, setEditedIncident] = useState({});
+
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
@@ -88,9 +104,9 @@ const IncidentPage = () => {
       ""
   );
 
-  // --- Détection "vrai nouvel incident" (PAS sur suppression/tri) ---
-  const prevIdsRef = useRef(new Set());   // IDs vus au dernier fetch
-  const isFirstLoadRef = useRef(true);    // pas de son au 1er chargement
+  // --- Détection "vrai nouvel incident" ---
+  const prevIdsRef = useRef(new Set());
+  const isFirstLoadRef = useRef(true);
 
   // --- Gestion du son ---
   const SOUND_URL =
@@ -105,7 +121,7 @@ const IncidentPage = () => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${API_URL}/api/me`, {
+        const res = await axios.get(`${BASE_API}/me`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
         });
@@ -126,8 +142,8 @@ const IncidentPage = () => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
         try {
-          const headers = buildHeaders(me, ""); // pas de filtre ici
-          const r = await axios.get(`${API_URL}/api/admins`, { headers });
+          const headers = buildHeaders(me);
+          const r = await axios.get(`${BASE_API}/admins`, { headers });
           const list = Array.isArray(r.data?.admins)
             ? r.data.admins
             : Array.isArray(r.data?.items)
@@ -155,7 +171,7 @@ const IncidentPage = () => {
     }
   }, [loadingMe, me]);
 
-  // Init audio + déverrouillage autoplay (lecture/pause sur 1ère interaction)
+  // Init audio + déverrouillage autoplay
   useEffect(() => {
     audioRef.current = new Audio(SOUND_URL);
     audioRef.current.preload = "auto";
@@ -211,12 +227,10 @@ const IncidentPage = () => {
       pendingPlayRef.current = true;
       return;
     }
-
     if (document.visibilityState !== "visible") {
       pendingPlayRef.current = true;
       return;
     }
-
     try {
       audio.currentTime = 0;
       await audio.play();
@@ -229,11 +243,12 @@ const IncidentPage = () => {
   const fetchIncidents = useCallback(async () => {
     if (loadingMe) return;
     try {
-      const headers = buildHeaders(me, selectedCommuneId);
-      const params = {};
-      if (periodFilter) params.period = periodFilter;
+      const headers = buildHeaders(me);
+      const params = buildParams(me, selectedCommuneId, {
+        period: periodFilter || undefined,
+      });
 
-      const response = await axios.get(`${API_URL}/api/incidents`, {
+      const response = await axios.get(`${BASE_API}/incidents`, {
         headers,
         params,
       });
@@ -244,7 +259,7 @@ const IncidentPage = () => {
         (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
       );
 
-      // Filtre statut si demandé
+      // Filtre statut si demandé (client)
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
@@ -261,7 +276,6 @@ const IncidentPage = () => {
       if (!isFirstLoadRef.current && hasNew) {
         playNotificationSound();
       }
-      // maj set des IDs vus pour prochain tick
       prevIdsRef.current = new Set(newIds);
       if (isFirstLoadRef.current) isFirstLoadRef.current = false;
 
@@ -283,8 +297,9 @@ const IncidentPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      const headers = buildHeaders(me, selectedCommuneId);
-      await axios.delete(`${API_URL}/api/incidents/${id}`, { headers });
+      const headers = buildHeaders(me);
+      const params = buildParams(me, selectedCommuneId);
+      await axios.delete(`${BASE_API}/incidents/${id}`, { headers, params });
       fetchIncidents();
     } catch (error) {
       console.error("Erreur suppression :", error);
@@ -309,15 +324,12 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      const headers = {
-        ...buildHeaders(me, selectedCommuneId),
-        "Content-Type": "application/json",
-      };
-      await axios.put(
-        `${API_URL}/api/incidents/${editIncidentId}`,
-        editedIncident,
-        { headers }
-      );
+      const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
+      const params = buildParams(me, selectedCommuneId);
+      await axios.put(`${BASE_API}/incidents/${editIncidentId}`, editedIncident, {
+        headers,
+        params,
+      });
       setEditIncidentId(null);
       fetchIncidents();
     } catch (error) {
@@ -471,6 +483,7 @@ const IncidentPage = () => {
                       ? new Date(incident.createdAt).toLocaleString("fr-FR")
                       : ""}
                   </p>
+
                   {incident.latitude && incident.longitude && (
                     <>
                       <p className="text-sm text-gray-600 mb-2">
@@ -483,6 +496,7 @@ const IncidentPage = () => {
                       />
                     </>
                   )}
+
                   <p className="text-sm text-gray-700 mb-2">
                     📝{" "}
                     {incident.adminComment || (

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
+// ⬇️ Utilise un client axios avec token auto (voir note en bas)
+import api from "../api";
 import { API_URL } from "../config";
 
 const ProjectListPage = () => {
@@ -20,12 +21,14 @@ const ProjectListPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/projects`);
+      const res = await api.get(`/api/projects`);
       setProjects(res.data);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement projets :", err);
-      setErrorMsg("❌ Impossible de charger les projets.");
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || "Impossible de charger les projets";
+      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
     }
   };
 
@@ -40,8 +43,8 @@ const ProjectListPage = () => {
   };
 
   const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    setImage(file);
+    const file = e.target.files?.[0];
+    setImage(file || null);
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => setImagePreview(reader.result);
@@ -52,33 +55,40 @@ const ProjectListPage = () => {
   };
 
   const handleUpdate = async () => {
+    if (!editingProject?._id) return;
+
     const formData = new FormData();
-    formData.append("name", name.trim());
-    formData.append("description", description);
+    formData.append("name", (name || "").trim());
+    // ReactQuill retourne du HTML (on l’envoie tel quel)
+    formData.append("description", description || "");
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(`${API_URL}/api/projects/${editingProject._id}`, formData, {
+      await api.put(`/api/projects/${editingProject._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSuccessMsg("✅ Projet modifié avec succès.");
       resetForm();
       fetchProjects();
     } catch (err) {
-      console.error("Erreur mise à jour projet :", err);
-      setErrorMsg("❌ Erreur lors de la mise à jour.");
+      console.error("Erreur mise à jour projet :", err?.response?.status, err?.response?.data);
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || "Erreur lors de la mise à jour";
+      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer ce projet ?")) return;
     try {
-      await axios.delete(`${API_URL}/api/projects/${id}`);
+      await api.delete(`/api/projects/${id}`);
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
-      console.error("Erreur suppression projet :", err);
-      setErrorMsg("❌ Erreur lors de la suppression.");
+      console.error("Erreur suppression projet :", err?.response?.status, err?.response?.data);
+      const status = err?.response?.status;
+      const msg = err?.response?.data?.message || err?.message || "Erreur lors de la suppression";
+      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
     }
   };
 
@@ -94,7 +104,7 @@ const ProjectListPage = () => {
 
   const getDescriptionSnippet = (html) => {
     const temp = document.createElement("div");
-    temp.innerHTML = html;
+    temp.innerHTML = html || "";
     const text = temp.textContent || temp.innerText || "";
     return text.length > 100 ? text.slice(0, 100) + "..." : text;
   };
@@ -190,7 +200,7 @@ const ProjectListPage = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => handleEditClick(project)}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+                className="bg-blue-500 hover	bg-blue-600 text-white px-3 py-1 rounded"
               >
                 ✏️ Modifier
               </button>
@@ -204,6 +214,9 @@ const ProjectListPage = () => {
           </li>
         ))}
       </ul>
+
+      {/* Juste pour être sûr que API_URL n'est pas vide en dev */}
+      <p className="text-xs text-gray-400 mt-6">API: {API_URL}</p>
     </div>
   );
 };

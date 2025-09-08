@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import axios from "axios";
+import api from "../api"; // 👈 remplace axios direct
 import { API_URL } from "../config";
 
 const ArticleListPage = () => {
@@ -18,12 +18,14 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/articles`);
+      const res = await api.get(`/api/articles`);
       setArticles(res.data);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement articles :", err);
-      setErrorMsg("❌ Impossible de charger les articles.");
+      setErrorMsg(
+        `❌ Impossible de charger les articles (${err?.response?.status || "réseau"}).`
+      );
     }
   };
 
@@ -38,8 +40,8 @@ const ArticleListPage = () => {
   };
 
   const handleImageChange = (e) => {
-    const file = e.target.files[0];
-    setImage(file);
+    const file = e.target.files?.[0];
+    setImage(file || null);
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => setImagePreview(reader.result);
@@ -50,13 +52,15 @@ const ArticleListPage = () => {
   };
 
   const handleUpdate = async () => {
+    if (!editingArticle?._id) return;
+
     const formData = new FormData();
-    formData.append("title", title.trim());
-    formData.append("content", content.trim());
+    formData.append("title", (title || "").trim());
+    formData.append("content", (content || "").trim());
     if (image) formData.append("image", image);
 
     try {
-      await axios.put(`${API_URL}/api/articles/${editingArticle._id}`, formData, {
+      await api.put(`/api/articles/${editingArticle._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSuccessMsg("✅ Article modifié avec succès.");
@@ -64,19 +68,25 @@ const ArticleListPage = () => {
       fetchArticles();
     } catch (err) {
       console.error("Erreur mise à jour article :", err);
-      setErrorMsg("❌ Erreur lors de la mise à jour.");
+      const msg =
+        err?.response?.data?.message ||
+        `Erreur lors de la mise à jour (${err?.response?.status || "réseau"}).`;
+      setErrorMsg(`❌ ${msg}`);
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await axios.delete(`${API_URL}/api/articles/${id}`);
+      await api.delete(`/api/articles/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
       console.error("Erreur suppression article :", err);
-      setErrorMsg("❌ Erreur lors de la suppression.");
+      const msg =
+        err?.response?.data?.message ||
+        `Erreur lors de la suppression (${err?.response?.status || "réseau"}).`;
+      setErrorMsg(`❌ ${msg}`);
     }
   };
 
@@ -90,7 +100,7 @@ const ArticleListPage = () => {
 
   const getPlainTextSnippet = (html, maxLength = 500) => {
     const temp = document.createElement("div");
-    temp.innerHTML = html;
+    temp.innerHTML = html || "";
     const text = temp.textContent || temp.innerText || "";
     return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
   };

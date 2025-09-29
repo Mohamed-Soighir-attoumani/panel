@@ -1,3 +1,4 @@
+// src/components/IncidentsChart.jsx
 import React, { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
@@ -6,92 +7,129 @@ ChartJS.register(...registerables);
 
 const nf = new Intl.NumberFormat("fr-FR");
 const dfDay = new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" });
-const dfMonthName = new Intl.DateTimeFormat("fr-FR", { month: "long" });
+const dfMonthShort = new Intl.DateTimeFormat("fr-FR", { month: "short" });
+const dfMonthLong = new Intl.DateTimeFormat("fr-FR", { month: "long" });
 
-/** Génère les 12 clés YYYY-MM pour l'année donnée */
-function yearMonthKeys(year) {
-  const arr = [];
-  for (let m = 1; m <= 12; m++) {
-    arr.push(`${year}-${String(m).padStart(2, "0")}`);
+/** Renvoie un tableau de dates (locales) entre start et end inclus, pas à pas en jours */
+function eachDayInclusive(start, end) {
+  const out = [];
+  const d = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (d <= last) {
+    out.push(new Date(d));
+    d.setDate(d.getDate() + 1);
   }
-  return arr;
+  return out;
 }
 
-/** Construit une série temporelle :
- * - period === '7' ou '30' -> par jour (sans remplissage)
- * - period === 'all'       -> 12 mois Jan→Déc de l'année courante (remplissage à 0)
- */
+/** Clé de jour YYYY-MM-DD */
+function dayKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+/** Clé de mois YYYY-MM */
+function monthKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Derniers 12 mois glissants (fin = maintenant) */
+function last12Months() {
+  const arr = [];
+  const end = new Date();
+  const base = new Date(end.getFullYear(), end.getMonth(), 1); // début du mois courant
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+    arr.push(d);
+  }
+  return arr; // 12 dates au 1er de chaque mois, du plus ancien au plus récent
+}
+
+/** Construit une série temporelle prête pour ChartJS */
 function buildTimeSeries(incidents, period) {
+  // Sécurise : garde uniquement les incidents avec createdAt valide
+  const safe = (Array.isArray(incidents) ? incidents : []).filter((it) => {
+    const t = it?.createdAt ? Date.parse(it.createdAt) : NaN;
+    return Number.isFinite(t);
+  });
+
   if (period === "all") {
-    const now = new Date();
-    const year = now.getFullYear();
+    // 12 derniers mois glissants, remplissage à 0
+    const months = last12Months();
+    const counts = new Map(months.map((d) => [monthKey(d), 0]));
 
-    // Dictionnaire mois de l’année courante initialisé à 0
-    const monthMap = new Map(yearMonthKeys(year).map((k) => [k, 0]));
-
-    // On n’incrémente que pour les incidents de l’année courante
-    for (const inc of incidents) {
-      if (!inc?.createdAt) continue;
+    for (const inc of safe) {
       const d = new Date(inc.createdAt);
-      if (d.getFullYear() !== year) continue;
-      const key = `${year}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      monthMap.set(key, (monthMap.get(key) || 0) + 1);
+      const key = monthKey(d);
+      if (counts.has(key)) {
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
     }
 
-    const keys = Array.from(monthMap.keys()); // déjà Jan→Déc
-    const displayLabels = keys.map((k) => {
-      const [, m] = k.split("-").map(Number);
-      return dfMonthName.format(new Date(year, m - 1, 1)); // "janvier", ...
+    const keys = months.map((d) => monthKey(d));
+    const displayLabels = months.map((d, i, arr) => {
+      // Ajoute l’année sur le premier mois et quand on change d’année (lisibilité)
+      const label = dfMonthLong.format(d); // "janvier", ...
+      const prev = i > 0 ? arr[i - 1] : null;
+      const showYear = !prev || prev.getFullYear() !== d.getFullYear();
+      return showYear ? `${label} ${d.getFullYear()}` : label;
     });
-    const data = keys.map((k) => monthMap.get(k) || 0);
-    return { keys, displayLabels, data, unit: "mois" };
+    const data = keys.map((k) => counts.get(k) || 0);
+    return { labels: displayLabels, data, unit: "mois" };
   }
 
-  // Cas '7' | '30' -> groupement par jour (sans remplissage)
-  const dayMap = new Map(); // YYYY-MM-DD -> count
-  for (const inc of incidents) {
-    if (!inc?.createdAt) continue;
+  // period = '7' ou '30' -> fenêtre glissante terminant aujourd’hui, remplie jour par jour
+  const windowDays = period === "30" ? 30 : 7;
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(end.getDate() - (windowDays - 1));
+
+  const days = eachDayInclusive(start, end);
+  const counts = new Map(days.map((d) => [dayKey(d), 0]));
+
+  for (const inc of safe) {
     const d = new Date(inc.createdAt);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate()
-    ).padStart(2, "0")}`;
-    dayMap.set(key, (dayMap.get(key) || 0) + 1);
+    // si dans la fenêtre
+    if (d >= new Date(start.getFullYear(), start.getMonth(), start.getDate()) &&
+        d <= new Date(end.getFullYear(), end.getMonth(), end.getDate())) {
+      const key = dayKey(d);
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
   }
-  const keys = Array.from(dayMap.keys()).sort();
-  const displayLabels = keys.map((k) => {
-    const [y, m, d] = k.split("-").map(Number);
-    return dfDay.format(new Date(y, m - 1, d));
-  });
-  const data = keys.map((k) => dayMap.get(k));
-  return { keys, displayLabels, data, unit: "jour" };
+
+  const labels = days.map((d) => dfDay.format(d)); // ex: "05 sept."
+  const data = days.map((d) => counts.get(dayKey(d)) || 0);
+  return { labels, data, unit: "jour" };
 }
 
 export default function IncidentsChart({ incidents = [], period = "7" }) {
-  const { displayLabels, data, unit } = useMemo(
+  const { labels, data, unit } = useMemo(
     () => buildTimeSeries(incidents, period),
     [incidents, period]
   );
 
   const chartData = useMemo(
     () => ({
-      labels: displayLabels,
+      labels,
       datasets: [
         {
           label: `Incidents par ${unit}`,
           data,
           borderWidth: 2,
           pointRadius: 3,
+          tension: 0.3,
           fill: false,
         },
       ],
     }),
-    [displayLabels, data, unit]
+    [labels, data, unit]
   );
 
   const options = {
     maintainAspectRatio: false,
-    animation: { duration: 600, easing: "easeInOutQuart" },
     responsive: true,
+    animation: { duration: 600, easing: "easeInOutQuart" },
     plugins: {
       legend: { position: "top" },
       tooltip: {
@@ -118,7 +156,7 @@ export default function IncidentsChart({ incidents = [], period = "7" }) {
   return (
     <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 360 }}>
       <h3 className="text-lg sm:text-xl font-semibold mb-4">📈 Évolution des incidents</h3>
-      {displayLabels.length === 0 ? (
+      {labels.length === 0 ? (
         <p className="text-gray-500">Aucune donnée pour la période choisie.</p>
       ) : (
         <Line data={chartData} options={options} />

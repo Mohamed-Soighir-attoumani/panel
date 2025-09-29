@@ -1,9 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+// src/components/Sidebar.jsx
+import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
 import { API_URL } from "../config";
 
-/* --- Helpers headers: token + x-commune-id (admin/superadmin) --- */
+/* --- Base API sûre (évite /api/api) --- */
+const BASE_API = API_URL.endsWith("/api") ? API_URL : `${API_URL}/api`;
+
+/* --- Headers avec token + x-commune-id selon rôle --- */
 function buildHeaders() {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
@@ -15,8 +19,10 @@ function buildHeaders() {
   } catch {
     me = null;
   }
-  if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
-  if (me?.role === "superadmin") {
+
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = me.communeId;
+  } else if (me?.role === "superadmin") {
     const selectedCid =
       (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
     if (selectedCid) headers["x-commune-id"] = selectedCid;
@@ -33,30 +39,38 @@ const Sidebar = () => {
 
   const isActive = (path) => location.pathname.startsWith(path);
 
-  // Recalcule les headers si LS change
-  const authHeaders = useMemo(buildHeaders, [
-    localStorage.getItem("token"),
-    localStorage.getItem("selectedCommuneId"),
-    localStorage.getItem("me"),
-  ]);
-
   useEffect(() => {
     let mounted = true;
     let intervalId;
 
     async function fetchIncidents() {
       try {
-        const res = await axios.get(`${API_URL}/api/incidents`, { headers: authHeaders });
-        const enCours = Array.isArray(res.data)
-          ? res.data.filter((i) => i.status === "En cours")
-          : [];
+        const headers = buildHeaders(); // (re)lit token + communeId à chaque tick
+        const res = await axios.get(`${BASE_API}/incidents`, { headers, validateStatus: () => true });
+
         if (!mounted) return;
-        setPendingCount(enCours.length);
+
+        if (res.status === 401 || res.status === 403) {
+          // ne casse pas la sidebar visuellement; on arrête juste le compteur
+          setPendingCount(0);
+          return;
+        }
+
+        if (res.status >= 200 && res.status < 300) {
+          const arr = Array.isArray(res.data) ? res.data : [];
+          const enCours = arr.filter((i) => i.status === "En cours");
+          setPendingCount(enCours.length);
+        } else {
+          // autres erreurs : on ne spam pas la console
+          setPendingCount(0);
+        }
       } catch {
-        /* silencieux */
+        if (!mounted) return;
+        setPendingCount(0);
       }
     }
 
+    // premier fetch immédiat puis polling
     fetchIncidents();
     intervalId = setInterval(fetchIncidents, 5000);
 
@@ -64,7 +78,7 @@ const Sidebar = () => {
       mounted = false;
       clearInterval(intervalId);
     };
-  }, [authHeaders]);
+  }, []); // pas de dépendances: on relit LS dans buildHeaders()
 
   return (
     <>
@@ -88,8 +102,6 @@ const Sidebar = () => {
       )}
 
       {/* --- Sidebar --- */}
-      {/* Desktop: bloc statique (pas de fixed, pas de hauteur forcée) -> défile avec la page */}
-      {/* Mobile: drawer (fixed) quand open */}
       <aside
         className={[
           "bg-gray-900 text-white",
@@ -130,7 +142,8 @@ const Sidebar = () => {
                 🏠 Tableau de bord
               </Link>
             </li>
-                          {/* Incidents */}
+
+            {/* Incidents */}
             <li className="border-t border-gray-700 pt-4 relative">
               <Link
                 to="/incidents"
@@ -155,7 +168,8 @@ const Sidebar = () => {
                 <span className="pointer-events-none absolute -top-1 -right-2 block w-3 h-3 rounded-full bg-red-500 animate-ping" />
               )}
             </li>
-            {/* ℹ️ Infos (Santé & Propreté) */}
+
+            {/* Infos (Santé & Propreté) */}
             <li className="border-t border-gray-700 pt-4">
               <Link
                 to="/infos/nouveau"
@@ -183,7 +197,7 @@ const Sidebar = () => {
 
             {/* Notifications */}
             <li className="border-t border-gray-700 pt-4">
-                            <Link
+              <Link
                 to="/notifications/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -194,7 +208,6 @@ const Sidebar = () => {
               </Link>
             </li>
             <li>
-            
               <Link
                 to="/notifications"
                 onClick={() => setOpen(false)}
@@ -210,7 +223,7 @@ const Sidebar = () => {
 
             {/* Articles */}
             <li className="border-t border-gray-700 pt-4">
-               <Link
+              <Link
                 to="/articles/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -224,7 +237,7 @@ const Sidebar = () => {
               </Link>
             </li>
             <li>
-            <Link
+              <Link
                 to="/articles/liste"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -237,8 +250,7 @@ const Sidebar = () => {
 
             {/* Projets */}
             <li className="border-t border-gray-700 pt-4">
-
-                <Link
+              <Link
                 to="/projects/nouveau"
                 onClick={() => setOpen(false)}
                 className={`flex items-center gap-2 text-base font-medium transition ${
@@ -250,7 +262,6 @@ const Sidebar = () => {
               >
                 📁 Créer un projet
               </Link>
-              
             </li>
             <li>
               <Link

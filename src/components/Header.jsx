@@ -3,11 +3,20 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu } from 'lucide-react';
+import { API_URL } from '../config'; // ✅ utilise la même source partout
 
-const API_URL = process.env.REACT_APP_API_URL || '';
+// ✅ Normalise la base API (évite /api/api)
+const BASE_API = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 
 function decodeJwt(token) {
-  try { return JSON.parse(atob(token.split('.')[1] || '')); } catch { return null; }
+  try {
+    const base64 = token.split('.')[1] || '';
+    // gère le padding base64
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
 }
 function norm(v) { return (v || '').toString().trim().toLowerCase(); }
 
@@ -19,7 +28,7 @@ export default function Header() {
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef(null);
 
-  const token = localStorage.getItem('token') || '';
+  const token = (typeof window !== 'undefined' && localStorage.getItem('token')) || '';
   const payload = token ? decodeJwt(token) : null;
   const isImpersonated = !!payload?.impersonated;
 
@@ -39,11 +48,11 @@ export default function Header() {
       window.location.reload();
     } else {
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      navigate('/login', { replace: true });
     }
   };
 
-  // Pré-hydrate avec le JWT puis va chercher /api/me
+  // Pré-hydrate avec le JWT puis va chercher /me
   useEffect(() => {
     if (payload) {
       setMe(prev => ({
@@ -54,18 +63,16 @@ export default function Header() {
       }));
     }
 
-    if (!token || !API_URL) return;
-    fetch(`${API_URL}/api/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    if (!token) return;
+    fetch(`${BASE_API}/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => {
         if (r.status === 401 || r.status === 403) {
           localStorage.removeItem('token');
           localStorage.removeItem('token_orig');
-          navigate('/login');
+          navigate('/login', { replace: true });
           return null;
         }
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
         const u = data?.user || {};
         const merged = {
           email: u.email || '',
@@ -76,8 +83,15 @@ export default function Header() {
         };
         setMe(merged);
         localStorage.setItem('admin', JSON.stringify(merged));
+        localStorage.setItem('me', JSON.stringify({ // utile pour Sidebar, etc.
+          email: merged.email,
+            name: merged.name,
+            communeName: merged.communeName,
+            role: merged.role,
+        }));
       })
       .catch(() => {
+        // fallback silencieux sur la dernière valeur connue
         try {
           const raw = localStorage.getItem('admin');
           if (raw) setMe(prev => ({ ...prev, ...JSON.parse(raw) }));
@@ -100,7 +114,8 @@ export default function Header() {
     localStorage.removeItem('token');
     localStorage.removeItem('token_orig');
     localStorage.removeItem('admin');
-    navigate('/login');
+    localStorage.removeItem('me');
+    navigate('/login', { replace: true });
   };
 
   const pageTitle =
@@ -111,16 +126,15 @@ export default function Header() {
         : 'Tableau de bord';
 
   const isSuperadmin = norm(me.role) === 'superadmin';
-  const isAdmin = norm(me.role) === 'admin'; // 👉 Visible seulement pour admin
+  const isAdmin = norm(me.role) === 'admin';
   const badgeUnderAvatar = isSuperadmin
     ? 'SUPERADMINISTRATEUR'
     : ((me.communeName || '').trim());
 
-  // Hauteur cible du header ~56px (h-10 avatar + bordure + py-2)
-  // => on fixe les barres sous le header à top-[56px]
+  // Hauteur cible du header ~56px
   return (
     <>
-      {/* Bannière impersonation (compacte, ne change pas la hauteur du header) */}
+      {/* Bannière impersonation */}
       {isImpersonated && (
         <div className="w-full bg-yellow-100 text-yellow-900 text-xs sm:text-sm py-1 text-center z-50">
           Mode superadmin : vous utilisez un autre compte.
@@ -130,24 +144,23 @@ export default function Header() {
         </div>
       )}
 
-      {/* HEADER FIXE compact */}
+      {/* HEADER FIXE */}
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black">
           <div className="flex items-center justify-between px-4 sm:px-6 py-2 max-w-screen-xl mx-auto">
-            {/* Gauche : burger + (si admin) 💳 Mon Abonnement */}
+            {/* Gauche : burger + Mon Abonnement (admin) */}
             <div className="flex items-center">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
-                onClick={() => setMenuOpen(!menuOpen)}
+                onClick={() => setMenuOpen((o) => !o)}
                 aria-label="Ouvrir le menu"
               >
                 <Menu className="w-6 h-6 text-gray-600" />
               </button>
 
-              {/* 💳 Mon Abonnement — visible UNIQUEMENT pour admin */}
               {isAdmin && (
                 <>
-                  {/* Version compacte mobile (icône seule) */}
+                  {/* mobile icône seule */}
                   <Link
                     to="/mon-abonnement"
                     className="sm:hidden ml-2 p-2 rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
@@ -155,7 +168,7 @@ export default function Header() {
                   >
                     💳
                   </Link>
-                  {/* Version texte pour ≥ sm */}
+                  {/* ≥ sm texte */}
                   <Link
                     to="/mon-abonnement"
                     className="hidden sm:inline-flex ml-2 items-center gap-1 px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
@@ -173,10 +186,10 @@ export default function Header() {
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar + badge très compact + menu profil */}
+            {/* Droite : avatar + profil */}
             <div className="relative flex flex-col items-center leading-none">
               <div
-                onClick={() => setProfileOpen(!profileOpen)}
+                onClick={() => setProfileOpen((o) => !o)}
                 className="h-10 w-10 rounded-full overflow-hidden cursor-pointer border-2 border-blue-500 hover:opacity-90 transition"
                 title="Profil"
               >
@@ -188,14 +201,13 @@ export default function Header() {
                 />
               </div>
 
-              {/* Badge compact (ne crée pas d’espace vertical supplémentaire) */}
               {badgeUnderAvatar ? (
                 <span className="text-[10px] font-semibold text-gray-700 tracking-wide uppercase mt-0.5">
                   {badgeUnderAvatar}
                 </span>
               ) : null}
 
-              {/* Menu Profil (déconnexion ici) */}
+              {/* Menu Profil */}
               <AnimatePresence>
                 {profileOpen && (
                   <motion.div
@@ -218,7 +230,6 @@ export default function Header() {
                       )}
                     </div>
 
-                    {/* 👇 Liens visibles uniquement pour le superadmin */}
                     {isSuperadmin && (
                       <Link
                         to="/profil"
@@ -285,7 +296,7 @@ export default function Header() {
         </header>
       </div>
 
-      {/* Bande d’urgence FIXE sous le header (ajustée à 56px) */}
+      {/* Bande d’urgence FIXE sous le header (top 56px) */}
       <AnimatePresence>
         {location.pathname.startsWith('/incident') && (
           <motion.div
@@ -309,7 +320,7 @@ export default function Header() {
         )}
       </AnimatePresence>
 
-      {/* Menu mobile latéral (top aligné à 56px) */}
+      {/* Menu mobile latéral (top 56px) */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -329,26 +340,25 @@ export default function Header() {
             <Link to="/notifications" onClick={() => setMenuOpen(false)} className="block py-2">
               🔔 Notifications
             </Link>
-            <Link to="/articles" onClick={() => setMenuOpen(false)} className="block py-2">
+            {/* ✅ routes alignées avec la sidebar */}
+            <Link to="/articles/nouveau" onClick={() => setMenuOpen(false)} className="block py-2">
               📝 Créer un Article
             </Link>
             <Link to="/articles/liste" onClick={() => setMenuOpen(false)} className="block py-2">
               📋 Liste des articles
             </Link>
-            <Link to="/projects" onClick={() => setMenuOpen(false)} className="block py-2">
+            <Link to="/projects/nouveau" onClick={() => setMenuOpen(false)} className="block py-2">
               📁 Créer un Projet
             </Link>
             <Link to="/projects/liste" onClick={() => setMenuOpen(false)} className="block py-2">
               📄 Liste des projets
             </Link>
 
-            {/* 💳 Mon abonnement — visible UNIQUEMENT pour admin (pas superadmin) */}
             {isAdmin && (
               <Link to="/mon-abonnement" onClick={() => setMenuOpen(false)} className="block py-2">
                 💳 Mon abonnement
               </Link>
             )}
-
             {isSuperadmin && (
               <Link to="/admins" onClick={() => setMenuOpen(false)} className="block py-2">
                 👥 Administrateurs (communes)

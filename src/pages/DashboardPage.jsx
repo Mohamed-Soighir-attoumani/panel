@@ -1,3 +1,4 @@
+// src/pages/DashboardPage.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { Bar } from "react-chartjs-2";
@@ -48,22 +49,42 @@ const DashboardPage = () => {
   const [activity, setActivity] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
 
-  // charge /api/me
+  const [bannerError, setBannerError] = useState("");
+
+  // charge /me (⚠️ API_URL contient déjà /api)
   useEffect(() => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${API_URL}/api/me`, {
+        const res = await axios.get(`${API_URL}/me`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
+          validateStatus: () => true,
         });
-        const user = res?.data?.user || null;
-        setMe(user);
-        localStorage.setItem("me", JSON.stringify(user));
-      } catch {
-        localStorage.removeItem("token");
-        localStorage.removeItem("token_orig");
-        window.location.href = "/login";
+
+        if (res.status === 200) {
+          const user = res?.data?.user || null;
+          if (!user) throw new Error("Réponse /me inattendue");
+          setMe(user);
+          localStorage.setItem("me", JSON.stringify(user));
+          setBannerError("");
+        } else if (res.status === 401 || res.status === 403) {
+          // déconnexion uniquement si non autorisé
+          localStorage.removeItem("token");
+          localStorage.removeItem("token_orig");
+          window.location.href = "/login";
+          return;
+        } else {
+          // ne pas déconnecter sur 404/500
+          setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
+          // essaye d'utiliser un "me" local pour afficher quand même le tableau de bord
+          const cached = localStorage.getItem("me");
+          if (cached) setMe(JSON.parse(cached));
+        }
+      } catch (e) {
+        setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+        const cached = localStorage.getItem("me");
+        if (cached) setMe(JSON.parse(cached));
       } finally {
         setLoadingMe(false);
       }
@@ -87,10 +108,18 @@ const DashboardPage = () => {
       const headers = buildHeaders(me);
       const qs = period === "all" ? "" : `?period=${period}`;
 
+      // ⚠️ pas de /api redoublé
       const [incidentRes, notifRes] = await Promise.all([
-        axios.get(`${API_URL}/api/incidents${qs}`, { headers }),
-        axios.get(`${API_URL}/api/notifications`, { headers }),
+        axios.get(`${API_URL}/incidents${qs}`, { headers, validateStatus: () => true }),
+        axios.get(`${API_URL}/notifications`, { headers, validateStatus: () => true }),
       ]);
+
+      if (incidentRes.status >= 400 && !handleAuthError(incidentRes)) {
+        throw new Error(`Incidents HTTP ${incidentRes.status}`);
+      }
+      if (notifRes.status >= 400 && !handleAuthError(notifRes)) {
+        throw new Error(`Notifications HTTP ${notifRes.status}`);
+      }
 
       const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
       const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
@@ -118,6 +147,7 @@ const DashboardPage = () => {
     } catch (err) {
       if (!handleAuthError(err)) {
         console.error("Erreur fetchData:", err);
+        setBannerError("Erreur lors du chargement des données.");
       }
     }
   };
@@ -126,13 +156,19 @@ const DashboardPage = () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
-      const res = await axios.get(`${API_URL}/api/devices/count`, { headers });
-      if (res.data && typeof res.data.count === "number") {
+      const res = await axios.get(`${API_URL}/devices/count`, {
+        headers,
+        validateStatus: () => true,
+      });
+      if (res.status === 200 && res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
+      } else if (!handleAuthError({ response: { status: res.status } })) {
+        setBannerError(`Erreur chargement utilisateurs (HTTP ${res.status}).`);
       }
     } catch (err) {
       if (!handleAuthError(err)) {
         console.error("Erreur fetchDeviceCount:", err);
+        setBannerError("Erreur chargement du nombre d'utilisateurs.");
       }
     }
   };
@@ -145,6 +181,7 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, me, loadingMe]);
 
   // ==== Répartition par types
@@ -168,9 +205,7 @@ const DashboardPage = () => {
       legend: { display: false },
       tooltip: {
         enabled: true,
-        callbacks: {
-          label: (ctx) => nf.format(ctx.parsed.y ?? 0),
-        },
+        callbacks: { label: (ctx) => nf.format(ctx.parsed.y ?? 0) },
       },
       datalabels: {
         anchor: "end",
@@ -185,9 +220,7 @@ const DashboardPage = () => {
       y: {
         beginAtZero: true,
         precision: 0,
-        ticks: {
-          callback: (v) => nf.format(v),
-        },
+        ticks: { callback: (v) => nf.format(v) },
       },
     },
   };
@@ -243,8 +276,18 @@ const DashboardPage = () => {
     </li>
   );
 
+  if (loadingMe) {
+    return <div className="p-6">Chargement…</div>;
+  }
+
   return (
     <div className="p-4 sm:p-6">
+      {bannerError && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
+          {bannerError}
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">
           📊 Tableau de bord
@@ -306,10 +349,10 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      {/* 📈 Courbe du fil de temps (dates FR + nombres FR) */}
+      {/* 📈 Courbe du fil de temps */}
       <IncidentsChart incidents={incidents} period={period} />
 
-      {/* 🧭 Répartition par types — pleine largeur */}
+      {/* 🧭 Répartition par types */}
       <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
         <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
         {typeLabels.length === 0 ? (

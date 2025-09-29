@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import axios from "axios";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
@@ -91,7 +91,7 @@ const DashboardPage = () => {
     })();
   }, []);
 
-  const handleAuthError = (err) => {
+  const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
     if (status === 401 || status === 403) {
       localStorage.removeItem("token");
@@ -100,9 +100,9 @@ const DashboardPage = () => {
       return true;
     }
     return false;
-  };
+  }, []);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
@@ -150,9 +150,9 @@ const DashboardPage = () => {
         setBannerError("Erreur lors du chargement des données.");
       }
     }
-  };
+  }, [handleAuthError, loadingMe, me, period]);
 
-  const fetchDeviceCount = async () => {
+  const fetchDeviceCount = useCallback(async () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
@@ -171,7 +171,7 @@ const DashboardPage = () => {
         setBannerError("Erreur chargement du nombre d'utilisateurs.");
       }
     }
-  };
+  }, [handleAuthError, loadingMe, me]);
 
   useEffect(() => {
     fetchData();
@@ -181,8 +181,7 @@ const DashboardPage = () => {
       fetchDeviceCount();
     }, 30000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, me, loadingMe]);
+  }, [fetchData, fetchDeviceCount]);
 
   // ==== Répartition par types
   const { typeLabels, typeCounts } = useMemo(() => {

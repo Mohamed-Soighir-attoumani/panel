@@ -29,20 +29,38 @@ export default function NotificationsCreate() {
 
   const [submitting, setSubmitting] = useState(false);
 
-  // Charger /api/me
+  // Charger /me (⚠️ API_URL inclut déjà /api)
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
-        const user = res?.data?.user || null;
-        setMe(user);
-        if (user?.role === "admin") {
-          // verrouille par défaut la commune de l’admin
-          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+        const res = await axios.get(`${API_URL}/me`, {
+          headers: buildAuthHeaders(),
+          timeout: 15000,
+          validateStatus: () => true,
+        });
+
+        if (res.status === 200) {
+          const user = res?.data?.user || null;
+          setMe(user);
+          if (user?.role === "admin") {
+            setVisibility((v) => ({
+              ...v,
+              communeId: user.communeId || "",
+              visibility: "local",
+            }));
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+          return;
+        } else {
+          console.warn("GET /me non OK:", res.status, res.data);
         }
-      } catch {
+      } catch (e) {
+        console.error("GET /me error:", e);
         localStorage.removeItem("token");
         window.location.assign("/login");
+        return;
       } finally {
         setLoadingMe(false);
       }
@@ -51,10 +69,12 @@ export default function NotificationsCreate() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title || !form.message) return alert("Titre et message sont requis");
+    if (!form.title || !form.message) {
+      alert("Titre et message sont requis");
+      return;
+    }
     setSubmitting(true);
     try {
-      // prépare payload JSON
       const payload = {
         title: form.title,
         message: form.message,
@@ -66,21 +86,36 @@ export default function NotificationsCreate() {
         endAt: visibility.endAt || null,
       };
 
-      const res = await axios.post(`${API_URL}/api/notifications`, payload, {
+      // ⚠️ API_URL inclut déjà /api → pas de /api en plus
+      const res = await axios.post(`${API_URL}/notifications`, payload, {
         headers: {
           "Content-Type": "application/json",
           ...buildAuthHeaders(),
         },
+        timeout: 20000,
+        validateStatus: () => true,
       });
 
-      if (res.status >= 200 && res.status < 300) {
-        alert("Notification créée ✅");
-        setForm({ title: "", message: "" });
-        // on ne reset pas totalement la visibilité pour éviter de re-saisir les mêmes valeurs
+      if (res.status === 401 || res.status === 403) {
+        alert("Votre session a expiré. Veuillez vous reconnecter.");
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+        return;
       }
+
+      if (res.status < 200 || res.status >= 300) {
+        const msg =
+          res?.data?.message ||
+          res?.statusText ||
+          `Erreur lors de la création (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+
+      alert("Notification créée ✅");
+      setForm({ title: "", message: "" });
     } catch (err) {
       console.error("Erreur création notif:", err);
-      alert(err?.response?.data?.message || "Erreur lors de la création");
+      alert(err?.message || err?.response?.data?.message || "Erreur lors de la création");
     } finally {
       setSubmitting(false);
     }

@@ -1,6 +1,7 @@
+// src/pages/InfosCreate.jsx
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import VisibilityControls from "../components/VisibilityControls"; // déjà présent
+import VisibilityControls from "../components/VisibilityControls";
 import { API_URL } from "../config";
 
 // -------------------------------
@@ -60,15 +61,35 @@ export default function InfosCreate() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
-        const user = res?.data?.user || null;
-        setMe(user);
-        if (user?.role === "admin") {
-          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+        // ⚠️ API_URL contient déjà /api
+        const res = await axios.get(`${API_URL}/me`, {
+          headers: buildAuthHeaders(),
+          timeout: 15000,
+          validateStatus: () => true,
+        });
+        if (res.status === 200) {
+          const user = res?.data?.user || null;
+          setMe(user);
+          if (user?.role === "admin") {
+            setVisibility((v) => ({
+              ...v,
+              communeId: user.communeId || "",
+              visibility: "local",
+            }));
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+          return;
+        } else {
+          // On ne déconnecte pas pour 404/500, on laisse l’utilisateur réessayer
+          console.warn("GET /me non OK:", res.status, res.data);
         }
-      } catch {
+      } catch (e) {
+        console.error("GET /me error:", e);
         localStorage.removeItem("token");
         window.location.assign("/login");
+        return;
       } finally {
         setLoadingMe(false);
       }
@@ -118,7 +139,12 @@ export default function InfosCreate() {
         : [{ type: "phone", label: "Appeler 15", value: "15" }],
     };
 
-    await axios.post(`${API_URL}/api/alerts`, payload, { headers: { ...buildAuthHeaders() } });
+    // ⚠️ API_URL contient déjà /api
+    await axios.post(`${API_URL}/alerts`, payload, {
+      headers: { ...buildAuthHeaders() },
+      timeout: 20000,
+      validateStatus: () => true,
+    });
   };
 
   const onSubmit = async (e) => {
@@ -148,15 +174,34 @@ export default function InfosCreate() {
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
-      const res = await axios.post(`${API_URL}/api/infos`, fd, { headers: { ...buildAuthHeaders() } });
+      // ⚠️ API_URL contient déjà /api
+      const res = await axios.post(`${API_URL}/infos`, fd, {
+        headers: { ...buildAuthHeaders() }, // ne pas fixer Content-Type : axios s'en charge
+        timeout: 20000,
+        validateStatus: () => true,
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        alert("Votre session a expiré. Veuillez vous reconnecter.");
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+        return;
+      }
+      if (res.status < 200 || res.status >= 300) {
+        const msg =
+          res?.data?.message ||
+          res?.statusText ||
+          `Erreur lors de la création (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+
       const createdInfo = res?.data?.info || res?.data; // selon ta réponse API
 
-      // 👉 Crée aussi l'alerte (bandeau) si prioritaire/activé
+      // 👉 Crée aussi l'alerte (bandeau) si prioritaire/activé (best-effort)
       try {
         await createBannerAlertIfNeeded(createdInfo);
       } catch (e) {
         console.error("Échec création bandeau:", e);
-        // on n'empêche pas la publication principale si l'alerte échoue
       }
 
       alert("Information publiée ✅");
@@ -172,7 +217,7 @@ export default function InfosCreate() {
       });
     } catch (err) {
       console.error("Erreur création info:", err);
-      alert(err?.response?.data?.message || "Erreur lors de la création");
+      alert(err?.message || err?.response?.data?.message || "Erreur lors de la création");
     } finally {
       setSubmitting(false);
     }

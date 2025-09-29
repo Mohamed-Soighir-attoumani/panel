@@ -40,7 +40,8 @@ export default function ArticleCreate() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
+        // ✅ API_URL contient déjà /api
+        const res = await axios.get(`${API_URL}/me`, { headers: buildAuthHeaders() });
         const user = res?.data?.user || null;
         setMe(user);
         if (user?.role === "admin") {
@@ -97,10 +98,11 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status); // draft/published
 
-      const res = await axios.post(`${API_URL}/api/articles`, fd, {
+      // ✅ API_URL contient déjà /api
+      const res = await axios.post(`${API_URL}/articles`, fd, {
         headers: {
           ...buildAuthHeaders(),
-          // ne pas fixer Content-Type: axios le fait pour FormData (boundary)
+          // Laisse axios définir le boundary de FormData
         },
       });
 

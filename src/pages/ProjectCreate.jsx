@@ -32,15 +32,35 @@ export default function ProjectCreate() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
-        const user = res?.data?.user || null;
-        setMe(user);
-        if (user?.role === "admin") {
-          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+        // ⚠️ API_URL contient déjà /api
+        const res = await axios.get(`${API_URL}/me`, {
+          headers: buildAuthHeaders(),
+          timeout: 15000,
+          validateStatus: () => true,
+        });
+
+        if (res.status === 200) {
+          const user = res?.data?.user || null;
+          setMe(user);
+          if (user?.role === "admin") {
+            setVisibility(v => ({
+              ...v,
+              communeId: user.communeId || "",
+              visibility: "local",
+            }));
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+          return;
+        } else {
+          console.warn("GET /me non OK:", res.status, res.data);
         }
-      } catch {
+      } catch (e) {
+        console.error("GET /me error:", e);
         localStorage.removeItem("token");
         window.location.assign("/login");
+        return;
       } finally {
         setLoadingMe(false);
       }
@@ -49,7 +69,10 @@ export default function ProjectCreate() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.description) return alert("Nom et description requis");
+    if (!form.name || !form.description) {
+      alert("Nom et description requis");
+      return;
+    }
     setSubmitting(true);
 
     try {
@@ -58,6 +81,7 @@ export default function ProjectCreate() {
       fd.append("description", form.description);
       if (form.imageFile) fd.append("image", form.imageFile);
 
+      // Visibilité
       fd.append("visibility", visibility.visibility);
       if (visibility.communeId) fd.append("communeId", visibility.communeId);
       if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
@@ -67,17 +91,36 @@ export default function ProjectCreate() {
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
-      const res = await axios.post(`${API_URL}/api/projects`, fd, {
-        headers: { ...buildAuthHeaders() },
+      // ⚠️ API_URL contient déjà /api
+      const res = await axios.post(`${API_URL}/projects`, fd, {
+        headers: {
+          ...buildAuthHeaders(),
+          // Ne PAS fixer Content-Type: axios s'en charge pour FormData (boundary)
+        },
+        timeout: 20000,
+        validateStatus: () => true,
       });
 
-      if (res.status >= 200 && res.status < 300) {
-        alert("Projet créé ✅");
-        setForm({ name: "", description: "", imageFile: null });
+      if (res.status === 401 || res.status === 403) {
+        alert("Votre session a expiré. Veuillez vous reconnecter.");
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+        return;
       }
+
+      if (res.status < 200 || res.status >= 300) {
+        const msg =
+          res?.data?.message ||
+          res?.statusText ||
+          `Erreur lors de la création (HTTP ${res.status}).`;
+        throw new Error(msg);
+      }
+
+      alert("Projet créé ✅");
+      setForm({ name: "", description: "", imageFile: null });
     } catch (err) {
       console.error("Erreur création projet:", err);
-      alert(err?.response?.data?.message || "Erreur lors de la création");
+      alert(err?.message || err?.response?.data?.message || "Erreur lors de la création");
     } finally {
       setSubmitting(false);
     }

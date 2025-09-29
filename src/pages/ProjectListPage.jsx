@@ -1,9 +1,19 @@
+// src/pages/ProjectListPage.jsx
 import React, { useState, useEffect } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
-// ⬇️ Utilise un client axios avec token auto (voir note en bas)
+// ⬇️ Instance axios avec baseURL + token interceptor (doit pointer vers .../api)
 import api from "../api";
 import { API_URL } from "../config";
+
+/** Construit une URL d'image fiable (si relative) */
+const toFullUrl = (p) => {
+  if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
+  if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
+  // API_URL contient déjà /api → on retire le /api pour servir les fichiers statiques
+  const base = API_URL.replace(/\/api\/?$/, "");
+  return `${base}${p.startsWith("/") ? "" : "/"}${p}`;
+};
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
@@ -21,13 +31,19 @@ const ProjectListPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await api.get(`/api/projects`);
-      setProjects(res.data);
+      // ⚠️ baseURL de `api` doit déjà inclure /api
+      const res = await api.get(`/projects`);
+      // backend renvoie probablement un tableau simple
+      const data = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+      setProjects(data);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement projets :", err);
       const status = err?.response?.status;
-      const msg = err?.response?.data?.message || err?.message || "Impossible de charger les projets";
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Impossible de charger les projets";
       setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
     }
   };
@@ -37,7 +53,7 @@ const ProjectListPage = () => {
     setName(project.name || "");
     setDescription(project.description || "");
     setImage(null);
-    setImagePreview(project.imageUrl || null);
+    setImagePreview(project.imageUrl ? toFullUrl(project.imageUrl) : null);
     setSuccessMsg("");
     setErrorMsg("");
   };
@@ -59,12 +75,12 @@ const ProjectListPage = () => {
 
     const formData = new FormData();
     formData.append("name", (name || "").trim());
-    // ReactQuill retourne du HTML (on l’envoie tel quel)
+    // ReactQuill retourne du HTML — on l’envoie tel quel
     formData.append("description", description || "");
     if (image) formData.append("image", image);
 
     try {
-      await api.put(`/api/projects/${editingProject._id}`, formData, {
+      await api.put(`/projects/${editingProject._id}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSuccessMsg("✅ Projet modifié avec succès.");
@@ -81,7 +97,7 @@ const ProjectListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer ce projet ?")) return;
     try {
-      await api.delete(`/api/projects/${id}`);
+      await api.delete(`/projects/${id}`);
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
@@ -184,13 +200,10 @@ const ProjectListPage = () => {
             <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
 
             <img
-              src={
-                project.imageUrl
-                  ? project.imageUrl
-                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
-              }
+              src={toFullUrl(project.imageUrl)}
               alt={`Image du projet ${project.name}`}
               className="h-40 w-full object-cover rounded border mb-3"
+              loading="lazy"
             />
 
             <p className="text-gray-700 mb-2">
@@ -200,7 +213,7 @@ const ProjectListPage = () => {
             <div className="flex gap-2">
               <button
                 onClick={() => handleEditClick(project)}
-                className="bg-blue-500 hover	bg-blue-600 text-white px-3 py-1 rounded"
+                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
               >
                 ✏️ Modifier
               </button>
@@ -215,7 +228,7 @@ const ProjectListPage = () => {
         ))}
       </ul>
 
-      {/* Juste pour être sûr que API_URL n'est pas vide en dev */}
+      {/* Info debug utile */}
       <p className="text-xs text-gray-400 mt-6">API: {API_URL}</p>
     </div>
   );

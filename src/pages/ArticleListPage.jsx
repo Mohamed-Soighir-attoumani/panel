@@ -1,12 +1,13 @@
 // src/pages/ArticleListPage.jsx
 import React, { useState, useEffect } from "react";
-import api from "../api"; // instance axios avec baseURL + token interceptor
-import { API_URL } from "../config";
+import api from "../api"; // instance axios avec baseURL = API_URL et token interceptor
+import { BASE_URL } from "../config"; // ← on utilise BASE_URL pour /uploads
 
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
-  return `${API_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
+  // Le backend sert /uploads à la racine (pas sous /api)
+  return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
@@ -36,9 +37,9 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
-      // côté panel, /api/articles (routes/articles.js) renvoie un tableau simple
-      const res = await api.get(`/api/articles`);
-      const data = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+      // ⚠️ api a déjà baseURL=/api → on appelle /articles (pas /api/articles)
+      const res = await api.get(`/articles`);
+      const data = Array.isArray(res.data) ? res.data : res.data?.items || [];
       setArticles(data);
       setErrorMsg("");
     } catch (err) {
@@ -98,9 +99,8 @@ const ArticleListPage = () => {
     if (sourceUrl) formData.append("sourceUrl", sourceUrl.trim());
 
     try {
-      await api.put(`/api/articles/${editingArticle._id}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // ⚠️ pas de /api ici
+      await api.put(`/articles/${editingArticle._id}`, formData);
       setSuccessMsg("✅ Article modifié avec succès.");
       resetForm();
       fetchArticles();
@@ -116,7 +116,8 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await api.delete(`/api/articles/${id}`);
+      // ⚠️ pas de /api ici
+      await api.delete(`/articles/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
@@ -145,7 +146,6 @@ const ArticleListPage = () => {
     temp.innerHTML = html || "";
     const text = temp.textContent || temp.innerText || "";
     return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
-    // (évite tout HTML pour l’aperçu)
   };
 
   const formatDate = (iso) => {

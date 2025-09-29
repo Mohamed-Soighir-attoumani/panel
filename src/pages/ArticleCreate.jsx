@@ -11,36 +11,12 @@ function buildAuthHeaders() {
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
-// Endpoints possibles pour /me
-const ME_ENDPOINT_CANDIDATES = ["/me", "/auth/me", "/users/me", "/account/me"];
-const ME_ENDPOINT_CACHE_KEY = "securidem:meEndpoint";
-
-async function resolveMeEndpoint() {
-  const cached = localStorage.getItem(ME_ENDPOINT_CACHE_KEY);
-  if (cached) return cached;
-
-  const headers = buildAuthHeaders();
-  for (const path of ME_ENDPOINT_CANDIDATES) {
-    try {
-      const res = await axios.get(`${API_URL}${path}`, {
-        headers,
-        validateStatus: () => true,
-        timeout: 12000,
-      });
-      if (res.status === 200 && (res.data?.user || res.data?.role || res.data?.email)) {
-        localStorage.setItem(ME_ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-      if (res.status === 401 || res.status === 403) {
-        localStorage.setItem(ME_ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-    } catch {
-      // on essaie le suivant
-    }
-  }
-  return "/me";
-}
+// ---- axios instance avec baseURL BACKEND ----
+const api = axios.create({
+  baseURL: API_URL, // ex: https://backend-admin-tygd.onrender.com/api
+  timeout: 20000,
+  validateStatus: () => true,
+});
 
 export default function ArticleCreate() {
   const [me, setMe] = useState(null);
@@ -55,66 +31,41 @@ export default function ArticleCreate() {
     authorName: "",
     publisher: "Association Bellevue Dembeni",
     sourceUrl: "",
-    status: "published", // 'draft' | 'published'
+    status: "published",
   });
 
   const [visibility, setVisibility] = useState({
     visibility: "local",
     communeId: "",
     audienceCommunes: [],
-    priority: "normal", // 'normal' | 'pinned' | 'urgent'
+    priority: "normal",
     startAt: "",
     endAt: "",
   });
 
-  async function loadMe() {
-    setLoadingMe(true);
-    try {
-      const mePath = await resolveMeEndpoint();
-      const res = await axios.get(`${API_URL}${mePath}`, {
-        headers: buildAuthHeaders(),
-        validateStatus: () => true,
-        timeout: 15000,
-      });
-
-      if (res.status === 200 && res.data) {
-        const user =
-          res?.data?.user ||
-          (res?.data?.role || res?.data?.email ? res.data : null);
-
-        if (user) {
-          setMe(user);
-          if (user?.role === "admin") {
-            setVisibility((v) => ({
-              ...v,
-              communeId: user.communeId || "",
-              visibility: "local",
-            }));
-          }
-        } else {
-          // Réponse inattendue : on laisse la page s'afficher,
-          // mais sans message intrusif.
-          console.warn("Réponse inattendue de /me :", res.data);
-        }
-      } else if (res.status === 401 || res.status === 403) {
-        // Session invalide → logout silencieux
-        localStorage.removeItem("token");
-        localStorage.removeItem(ME_ENDPOINT_CACHE_KEY);
-        window.location.assign("/login");
-        return;
-      } else {
-        // Autre statut (ex: 404 si mauvais API_URL)
-        console.warn(`/me a répondu HTTP ${res.status}`, res.data);
-      }
-    } catch (err) {
-      console.warn("Erreur /me (réseau/CORS/timeout) :", err?.message || err);
-    } finally {
-      setLoadingMe(false);
-    }
-  }
-
   useEffect(() => {
-    loadMe();
+    (async () => {
+      setLoadingMe(true);
+      try {
+        const res = await api.get("/me", { headers: buildAuthHeaders() });
+        if (res.status === 200) {
+          const user = res.data?.user || (res.data?.role ? res.data : null);
+          setMe(user || null);
+          if (user?.role === "admin") {
+            setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+          return;
+        }
+      } catch (e) {
+        // silencieux, on laisse l'utilisateur retenter
+        console.warn("GET /me failed:", e?.message || e);
+      } finally {
+        setLoadingMe(false);
+      }
+    })();
   }, []);
 
   const onFileChange = (e) => {
@@ -143,7 +94,6 @@ export default function ArticleCreate() {
       fd.append("content", form.content);
       if (form.imageFile) fd.append("image", form.imageFile);
 
-      // Visibilité / fenêtre
       fd.append("visibility", visibility.visibility);
       if (visibility.communeId) fd.append("communeId", visibility.communeId);
       if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
@@ -153,20 +103,13 @@ export default function ArticleCreate() {
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
-      // Métadonnées Play
       if (form.authorName) fd.append("authorName", form.authorName);
       if (form.publisher) fd.append("publisher", form.publisher);
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status);
 
-      const res = await axios.post(`${API_URL}/articles`, fd, {
-        headers: {
-          ...buildAuthHeaders(),
-          // axios gère le boundary de FormData
-        },
-        validateStatus: () => true,
-        timeout: 20000,
-      });
+      // >>> ICI on utilise l'instance axios baseURL=API_URL
+      const res = await api.post("/articles", fd, { headers: buildAuthHeaders() });
 
       if (res.status === 201 || (res.status >= 200 && res.status < 300)) {
         alert("Article créé ✅");
@@ -184,18 +127,13 @@ export default function ArticleCreate() {
         alert("Votre session a expiré. Veuillez vous reconnecter.");
         localStorage.removeItem("token");
         window.location.assign("/login");
-        return;
       } else {
-        const msg =
-          res?.data?.message ||
-          res?.statusText ||
-          `Erreur lors de la création (HTTP ${res.status}).`;
+        const msg = res?.data?.message || res?.statusText || `Erreur (HTTP ${res.status})`;
         alert(`❌ ${msg}`);
         console.error("POST /articles error:", res.status, msg, res.data);
       }
     } catch (err) {
-      const isTimeout = err?.code === "ECONNABORTED";
-      const msg = isTimeout ? "Délai dépassé (timeout)." : (err?.message || "Erreur réseau/CORS.");
+      const msg = err?.message || "Erreur réseau/CORS.";
       alert(`❌ ${msg}`);
       console.error("POST /articles exception:", err);
     } finally {
@@ -243,7 +181,6 @@ export default function ArticleCreate() {
             )}
           </div>
 
-          {/* Métadonnées Play */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm text-gray-700 mb-1">Auteur (affiché)</label>
@@ -289,7 +226,6 @@ export default function ArticleCreate() {
           </div>
         </div>
 
-        {/* Visibilité / période / priorité */}
         <VisibilityControls me={me} value={visibility} onChange={setVisibility} />
 
         <div className="flex gap-2">

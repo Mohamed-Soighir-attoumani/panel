@@ -3,10 +3,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config"; // 🔗 backend
-
-// ===== Normalisation base API (évite /api/api) =====
-const BASE_API = API_URL.endsWith("/api") ? API_URL : `${API_URL}/api`;
+import { API_URL } from "../config"; // ⚠️ contient déjà /api
 
 // ====== Cartes ======
 const IncidentMap = ({ latitude, longitude }) => (
@@ -25,10 +22,7 @@ const IncidentMap = ({ latitude, longitude }) => (
 
 const GlobalIncidentMap = ({ incidents }) => {
   if (!incidents || incidents.length === 0) return null;
-  const center = [
-    incidents[0].latitude || 0,
-    incidents[0].longitude || 0,
-  ];
+  const center = [incidents[0].latitude || 0, incidents[0].longitude || 0];
 
   return (
     <MapContainer
@@ -40,10 +34,7 @@ const GlobalIncidentMap = ({ incidents }) => {
       <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       {incidents.map((incident) =>
         incident.latitude && incident.longitude ? (
-          <Marker
-            key={incident._id}
-            position={[incident.latitude, incident.longitude]}
-          >
+          <Marker key={incident._id} position={[incident.latitude, incident.longitude]}>
             <Popup>
               <strong>{incident.title}</strong>
               <br />
@@ -58,8 +49,7 @@ const GlobalIncidentMap = ({ incidents }) => {
 
 // === helper headers ===
 function buildHeaders(me) {
-  const token =
-    (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
@@ -68,17 +58,14 @@ function buildHeaders(me) {
 // === helper params (communeId côté requêtes) ===
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
-
   // Admin: force sa commune
   if (me?.role === "admin" && me?.communeId) {
     params.communeId = me.communeId;
   }
-
   // Superadmin: applique le filtre si choisi
   if (me?.role === "superadmin" && selectedCommuneId) {
     params.communeId = selectedCommuneId;
   }
-
   return params;
 }
 
@@ -99,9 +86,7 @@ const IncidentPage = () => {
   // 🔽 communes list pour le superadmin
   const [communes, setCommunes] = useState([]);
   const [selectedCommuneId, setSelectedCommuneId] = useState(
-    (typeof window !== "undefined" &&
-      localStorage.getItem("selectedCommuneId")) ||
-      ""
+    (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || ""
   );
 
   // --- Détection "vrai nouvel incident" ---
@@ -110,61 +95,89 @@ const IncidentPage = () => {
 
   // --- Gestion du son ---
   const SOUND_URL =
-    (typeof window !== "undefined" ? window.location.origin : "") +
-    "/sounds/notification.mp3";
+    (typeof window !== "undefined" ? window.location.origin : "") + "/sounds/notification.mp3";
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
   const pendingPlayRef = useRef(false);
 
-  // charge /api/me pour connaître le rôle/commune
+  // charge /me pour connaître le rôle/commune
   useEffect(() => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${BASE_API}/me`, {
+        const res = await axios.get(`${API_URL}/me`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
+          validateStatus: () => true,
         });
-        const user = res?.data?.user || null;
-        setMe(user);
-        localStorage.setItem("me", JSON.stringify(user));
-      } catch {
-        localStorage.removeItem("token");
-        window.location.href = "/login";
+
+        if (res.status === 200) {
+          const user = res?.data?.user || null;
+          setMe(user);
+          localStorage.setItem("me", JSON.stringify(user));
+        } else if (res.status === 401 || res.status === 403) {
+          // Only logout on true auth errors
+          localStorage.removeItem("token");
+          window.location.href = "/login";
+          return;
+        } else {
+          console.warn("GET /me non-200:", res.status, res.data);
+          // ne pas déconnecter sur 404/500 réseau, on laisse accéder en mode dégradé
+          setMe(null);
+        }
+      } catch (e) {
+        console.error("GET /me error:", e);
+        // ne pas déconnecter brutalement sur erreur réseau; proposer le login si actions protégées échouent
+        setMe(null);
       } finally {
         setLoadingMe(false);
       }
     })();
   }, []);
 
-  // si superadmin, charger les communes depuis /api/admins
+  // superadmin : charger les communes depuis /api/communes (fallback: alias public)
   useEffect(() => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
         try {
           const headers = buildHeaders(me);
-          const r = await axios.get(`${BASE_API}/admins`, { headers });
-          const list = Array.isArray(r.data?.admins)
-            ? r.data.admins
-            : Array.isArray(r.data?.items)
-            ? r.data.items
-            : [];
-          const map = new Map();
-          for (const a of list) {
-            const id = (a.communeId || "").trim();
-            if (!id) continue;
-            const name = (a.communeName || a.communeId || "").trim();
-            map.set(id, name || id);
+          // 1er essai: /api/communes
+          let list = [];
+          try {
+            const r = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
+            const arr = Array.isArray(r.data)
+              ? r.data
+              : Array.isArray(r.data?.items)
+              ? r.data.items
+              : Array.isArray(r.data?.data)
+              ? r.data.data
+              : [];
+            list = arr;
+          } catch {
+            // Fallback si reverse proxy: alias public sans /api
+            const baseNoApi = API_URL.replace(/\/api\/?$/, "");
+            const r2 = await axios.get(`${baseNoApi}/communes`, { headers, timeout: 15000 });
+            const arr2 = Array.isArray(r2.data)
+              ? r2.data
+              : Array.isArray(r2.data?.items)
+              ? r2.data.items
+              : Array.isArray(r2.data?.data)
+              ? r2.data.data
+              : [];
+            list = arr2;
           }
-          const arr = Array.from(map.entries())
-            .map(([id, name]) => ({ id, name }))
+
+          const normalized = (list || [])
+            .map((c) => ({
+              id: String(c.id ?? c._id ?? c.slug ?? c.code ?? "").trim(),
+              name: String(c.name ?? c.label ?? c.communeName ?? "Commune").trim(),
+            }))
+            .filter((c) => c.id)
             .sort((a, b) => a.name.localeCompare(b.name, "fr"));
-          setCommunes(arr);
+
+          setCommunes(normalized);
         } catch (e) {
-          console.warn(
-            "Impossible de charger la liste des communes:",
-            e?.message || e
-          );
+          console.warn("Impossible de charger la liste des communes:", e?.message || e);
           setCommunes([]);
         }
       })();
@@ -248,16 +261,23 @@ const IncidentPage = () => {
         period: periodFilter || undefined,
       });
 
-      const response = await axios.get(`${BASE_API}/incidents`, {
+      const response = await axios.get(`${API_URL}/incidents`, {
         headers,
         params,
+        timeout: 20000,
+        validateStatus: () => true,
       });
+
+      if (response.status === 401 || response.status === 403) {
+        // Auth expirée
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+        return;
+      }
 
       let data = Array.isArray(response.data) ? response.data : [];
       // Tri : plus récent en premier
-      data = data.sort(
-        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-      );
+      data = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       // Filtre statut si demandé (client)
       if (statusFilter !== "Tous") {
@@ -280,6 +300,7 @@ const IncidentPage = () => {
       if (isFirstLoadRef.current) isFirstLoadRef.current = false;
 
       setIncidents(data);
+      setError(null);
       setLoading(false);
     } catch (error) {
       console.error("Erreur chargement incidents :", error);
@@ -299,7 +320,22 @@ const IncidentPage = () => {
     try {
       const headers = buildHeaders(me);
       const params = buildParams(me, selectedCommuneId);
-      await axios.delete(`${BASE_API}/incidents/${id}`, { headers, params });
+      const res = await axios.delete(`${API_URL}/incidents/${id}`, {
+        headers,
+        params,
+        timeout: 15000,
+        validateStatus: () => true,
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+        return;
+      }
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(res?.data?.message || `Erreur (HTTP ${res.status})`);
+      }
+
       fetchIncidents();
     } catch (error) {
       console.error("Erreur suppression :", error);
@@ -326,10 +362,22 @@ const IncidentPage = () => {
     try {
       const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
       const params = buildParams(me, selectedCommuneId);
-      await axios.put(`${BASE_API}/incidents/${editIncidentId}`, editedIncident, {
+      const res = await axios.put(`${API_URL}/incidents/${editIncidentId}`, editedIncident, {
         headers,
         params,
+        timeout: 20000,
+        validateStatus: () => true,
       });
+
+      if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+        return;
+      }
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(res?.data?.message || `Erreur (HTTP ${res.status})`);
+      }
+
       setEditIncidentId(null);
       fetchIncidents();
     } catch (error) {
@@ -412,10 +460,7 @@ const IncidentPage = () => {
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {incidents.map((incident) => (
-            <div
-              key={incident._id}
-              className="bg-white p-5 rounded-xl shadow-md border"
-            >
+            <div key={incident._id} className="bg-white p-5 rounded-xl shadow-md border">
               {editIncidentId === incident._id ? (
                 <>
                   <input
@@ -468,12 +513,8 @@ const IncidentPage = () => {
                 <>
                   <h2 className="text-lg font-bold mb-1">{incident.title}</h2>
                   <p className="text-gray-700 mb-2">{incident.description}</p>
-                  <p className="text-sm text-gray-500 italic mb-1">
-                    📍 {incident.lieu}
-                  </p>
-                  <p className="text-sm text-blue-600 font-medium mb-1">
-                    📌 {incident.status}
-                  </p>
+                  <p className="text-sm text-gray-500 italic mb-1">📍 {incident.lieu}</p>
+                  <p className="text-sm text-blue-600 font-medium mb-1">📌 {incident.status}</p>
                   <p className="text-sm text-gray-600 mb-1">
                     📬 {incident.adresse || "Adresse inconnue"}
                   </p>
@@ -487,39 +528,25 @@ const IncidentPage = () => {
                   {incident.latitude && incident.longitude && (
                     <>
                       <p className="text-sm text-gray-600 mb-2">
-                        🛱️ {incident.latitude.toFixed(5)},{" "}
-                        {incident.longitude.toFixed(5)}
+                        🛱️ {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
                       </p>
-                      <IncidentMap
-                        latitude={incident.latitude}
-                        longitude={incident.longitude}
-                      />
+                      <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
                     </>
                   )}
 
                   <p className="text-sm text-gray-700 mb-2">
-                    📝{" "}
-                    {incident.adminComment || (
-                      <em className="text-gray-400">Aucun commentaire</em>
-                    )}
+                    📝 {incident.adminComment || <em className="text-gray-400">Aucun commentaire</em>}
                   </p>
 
                   <div className="mt-3">
                     {incident.mediaUrl ? (
                       incident.mediaType === "video" ? (
-                        <video
-                          controls
-                          className="w-full h-40 rounded-lg border object-cover"
-                        >
+                        <video controls className="w-full h-40 rounded-lg border object-cover">
                           <source src={incident.mediaUrl} type="video/mp4" />
                           Votre navigateur ne prend pas en charge les vidéos.
                         </video>
                       ) : (
-                        <a
-                          href={incident.mediaUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
+                        <a href={incident.mediaUrl} target="_blank" rel="noopener noreferrer">
                           <img
                             src={incident.mediaUrl}
                             alt="media"

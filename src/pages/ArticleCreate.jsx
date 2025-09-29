@@ -16,7 +16,10 @@ export default function ArticleCreate() {
   const [loadingMe, setLoadingMe] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
+
+  // Diagnostic UI
   const [pageError, setPageError] = useState("");
+  const [diag, setDiag] = useState({ status: null, message: "", kind: "" });
 
   const [form, setForm] = useState({
     title: "",
@@ -38,34 +41,67 @@ export default function ArticleCreate() {
     endAt: "",
   });
 
-  useEffect(() => {
-    (async () => {
-      try {
-        // IMPORTANT : API_URL inclut déjà /api -> /api/me
-        const res = await axios.get(`${API_URL}/me`, { headers: buildAuthHeaders() });
+  async function loadMe() {
+    setLoadingMe(true);
+    setPageError("");
+    setDiag({ status: null, message: "", kind: "" });
+
+    try {
+      // IMPORTANT : API_URL inclut déjà /api -> /api/me
+      const res = await axios.get(`${API_URL}/me`, {
+        headers: buildAuthHeaders(),
+        // On veut lire même les 4xx/5xx pour le diagnostic
+        validateStatus: () => true,
+        timeout: 15000,
+      });
+
+      if (res.status === 200 && res.data) {
         const user = res?.data?.user || null;
         setMe(user);
         if (user?.role === "admin") {
-          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+          setVisibility((v) => ({
+            ...v,
+            communeId: user.communeId || "",
+            visibility: "local",
+          }));
         }
         setPageError("");
-      } catch (err) {
-        const status = err?.response?.status;
-        if (status === 401 || status === 403) {
-          // Uniquement pour l'auth réellement invalide
-          localStorage.removeItem("token");
-          window.location.assign("/login");
-          return;
-        }
-        // Réseau / 404 / autre : on n’ejecte PAS l’utilisateur
-        console.error("Erreur /me :", err);
+        setDiag({ status: 200, message: "OK", kind: "ok" });
+      } else if (res.status === 401 || res.status === 403) {
+        // Auth réellement invalide -> on déconnecte
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+        return;
+      } else {
+        // Autres erreurs côté serveur (404/500…)
+        const msg =
+          res?.data?.message ||
+          res?.statusText ||
+          "Réponse inattendue du serveur";
         setPageError(
           "Impossible de vérifier votre session pour le moment. Réessayez plus tard ou actualisez la page."
         );
-      } finally {
-        setLoadingMe(false);
+        setDiag({ status: res.status, message: msg, kind: "http" });
+        console.error("GET /me error:", res.status, msg, res.data);
       }
-    })();
+    } catch (err) {
+      // Erreur réseau/CORS/timeout
+      const isTimeout = err?.code === "ECONNABORTED";
+      const msg = isTimeout
+        ? "Délai dépassé (timeout)."
+        : (err?.message || "Erreur réseau/CORS.");
+      setPageError(
+        "Impossible de vérifier votre session pour le moment. Réessayez plus tard ou actualisez la page."
+      );
+      setDiag({ status: null, message: msg, kind: isTimeout ? "timeout" : "network" });
+      console.error("GET /me exception:", err);
+    } finally {
+      setLoadingMe(false);
+    }
+  }
+
+  useEffect(() => {
+    loadMe();
   }, []);
 
   const onFileChange = (e) => {
@@ -116,9 +152,11 @@ export default function ArticleCreate() {
           ...buildAuthHeaders(),
           // Ne pas fixer Content-Type, axios s'en charge pour FormData (boundary)
         },
+        validateStatus: () => true,
+        timeout: 20000,
       });
 
-      if (res.status >= 200 && res.status < 300) {
+      if (res.status === 201 || (res.status >= 200 && res.status < 300)) {
         alert("Article créé ✅");
         setForm({
           title: "",
@@ -130,19 +168,41 @@ export default function ArticleCreate() {
           status: "published",
         });
         setPreview(null);
-      }
-    } catch (err) {
-      const status = err?.response?.status;
-      if (status === 401 || status === 403) {
+      } else if (res.status === 401 || res.status === 403) {
         alert("Votre session a expiré. Veuillez vous reconnecter.");
         localStorage.removeItem("token");
         window.location.assign("/login");
         return;
+      } else {
+        const msg =
+          res?.data?.message ||
+          res?.statusText ||
+          `Erreur lors de la création (HTTP ${res.status}).`;
+        alert(`❌ ${msg}`);
+        console.error("POST /articles error:", res.status, msg, res.data);
       }
-      console.error("Erreur création article:", err);
-      alert(err?.response?.data?.message || "Erreur lors de la création");
+    } catch (err) {
+      const isTimeout = err?.code === "ECONNABORTED";
+      const msg = isTimeout ? "Délai dépassé (timeout)." : (err?.message || "Erreur réseau/CORS.");
+      alert(`❌ ${msg}`);
+      console.error("POST /articles exception:", err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const testMe = async () => {
+    // Petit bouton de test pour voir ce que renvoie /me
+    try {
+      const res = await axios.get(`${API_URL}/me`, {
+        headers: buildAuthHeaders(),
+        validateStatus: () => true,
+      });
+      console.log("[TEST /me] status:", res.status, "data:", res.data);
+      alert(`Test /me → HTTP ${res.status}`);
+    } catch (e) {
+      console.error("[TEST /me] exception:", e);
+      alert("Test /me : exception réseau (voir console).");
     }
   };
 
@@ -154,7 +214,35 @@ export default function ArticleCreate() {
 
       {pageError && (
         <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
-          {pageError}
+          <div className="font-semibold mb-1">{pageError}</div>
+          {/* Bloc diagnostic succinct pour t’aider à cibler le problème */}
+          <div className="text-sm text-amber-900">
+            {diag.kind === "http" && (
+              <>Détail : HTTP {diag.status} – {diag.message}</>
+            )}
+            {diag.kind === "network" && (
+              <>Détail : erreur réseau/CORS – {diag.message}</>
+            )}
+            {diag.kind === "timeout" && (
+              <>Détail : délai dépassé (timeout).</>
+            )}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={loadMe}
+              className="px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Réessayer
+            </button>
+            <button
+              type="button"
+              onClick={testMe}
+              className="px-3 py-1 rounded border"
+            >
+              Tester /me (console)
+            </button>
+          </div>
         </div>
       )}
 

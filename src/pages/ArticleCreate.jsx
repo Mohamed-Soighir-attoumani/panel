@@ -1,216 +1,247 @@
-import React, { useState, useEffect } from "react";
-import api from "../api"; // 👈 remplace axios direct
+// src/pages/ArticleCreate.jsx
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import VisibilityControls from "../components/VisibilityControls";
 import { API_URL } from "../config";
 
-const ArticleListPage = () => {
-  const [articles, setArticles] = useState([]);
-  const [editingArticle, setEditingArticle] = useState(null);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [image, setImage] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
-  const [successMsg, setSuccessMsg] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
+function buildAuthHeaders() {
+  const token = localStorage.getItem("token") || "";
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
+
+export default function ArticleCreate() {
+  const [me, setMe] = useState(null);
+  const [loadingMe, setLoadingMe] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [preview, setPreview] = useState(null);
+
+  const [form, setForm] = useState({
+    title: "",
+    content: "",
+    imageFile: null,
+    // Métadonnées Play
+    authorName: "",
+    publisher: "Association Bellevue Dembeni",
+    sourceUrl: "",
+    status: "published", // 'draft' | 'published'
+  });
+
+  const [visibility, setVisibility] = useState({
+    visibility: "local",
+    communeId: "",
+    audienceCommunes: [],
+    priority: "normal", // 'normal' | 'pinned' | 'urgent'
+    startAt: "",
+    endAt: "",
+  });
 
   useEffect(() => {
-    fetchArticles();
+    (async () => {
+      try {
+        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
+        const user = res?.data?.user || null;
+        setMe(user);
+        if (user?.role === "admin") {
+          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+        }
+      } catch {
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+      } finally {
+        setLoadingMe(false);
+      }
+    })();
   }, []);
 
-  const fetchArticles = async () => {
-    try {
-      const res = await api.get(`/api/articles`);
-      setArticles(res.data);
-      setErrorMsg("");
-    } catch (err) {
-      console.error("Erreur chargement articles :", err);
-      setErrorMsg(
-        `❌ Impossible de charger les articles (${err?.response?.status || "réseau"}).`
-      );
-    }
-  };
-
-  const handleEditClick = (article) => {
-    setEditingArticle(article);
-    setTitle(article.title || "");
-    setContent(article.content || "");
-    setImage(null);
-    setImagePreview(article.imageUrl || null);
-    setSuccessMsg("");
-    setErrorMsg("");
-  };
-
-  const handleImageChange = (e) => {
-    const file = e.target.files?.[0];
-    setImage(file || null);
+  const onFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setForm((f) => ({ ...f, imageFile: file }));
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => setImagePreview(reader.result);
+      reader.onloadend = () => setPreview(reader.result);
       reader.readAsDataURL(file);
     } else {
-      setImagePreview(null);
+      setPreview(null);
     }
   };
 
-  const handleUpdate = async () => {
-    if (!editingArticle?._id) return;
-
-    const formData = new FormData();
-    formData.append("title", (title || "").trim());
-    formData.append("content", (content || "").trim());
-    if (image) formData.append("image", image);
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.title || !form.content) return alert("Titre et contenu requis");
+    if (form.sourceUrl && !isHttpUrl(form.sourceUrl)) {
+      return alert("L’URL de la source doit commencer par http(s)://");
+    }
+    setSubmitting(true);
 
     try {
-      await api.put(`/api/articles/${editingArticle._id}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+      const fd = new FormData();
+      fd.append("title", form.title);
+      fd.append("content", form.content);
+      if (form.imageFile) fd.append("image", form.imageFile);
+
+      // Visibilité / fenêtre
+      fd.append("visibility", visibility.visibility);
+      if (visibility.communeId) fd.append("communeId", visibility.communeId);
+      if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
+        visibility.audienceCommunes.forEach((c) => fd.append("audienceCommunes[]", c));
+      }
+      fd.append("priority", visibility.priority);
+      if (visibility.startAt) fd.append("startAt", visibility.startAt);
+      if (visibility.endAt) fd.append("endAt", visibility.endAt);
+
+      // Métadonnées Play
+      if (form.authorName) fd.append("authorName", form.authorName);
+      if (form.publisher) fd.append("publisher", form.publisher);
+      if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
+      fd.append("status", form.status); // draft/published
+
+      const res = await axios.post(`${API_URL}/api/articles`, fd, {
+        headers: {
+          ...buildAuthHeaders(),
+          // ne pas fixer Content-Type: axios le fait pour FormData (boundary)
+        },
       });
-      setSuccessMsg("✅ Article modifié avec succès.");
-      resetForm();
-      fetchArticles();
+
+      if (res.status >= 200 && res.status < 300) {
+        alert("Article créé ✅");
+        setForm({
+          title: "",
+          content: "",
+          imageFile: null,
+          authorName: "",
+          publisher: "Association Bellevue Dembeni",
+          sourceUrl: "",
+          status: "published",
+        });
+        setPreview(null);
+      }
     } catch (err) {
-      console.error("Erreur mise à jour article :", err);
-      const msg =
-        err?.response?.data?.message ||
-        `Erreur lors de la mise à jour (${err?.response?.status || "réseau"}).`;
-      setErrorMsg(`❌ ${msg}`);
+      console.error("Erreur création article:", err);
+      alert(err?.response?.data?.message || "Erreur lors de la création");
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Supprimer cet article ?")) return;
-    try {
-      await api.delete(`/api/articles/${id}`);
-      setSuccessMsg("✅ Article supprimé.");
-      fetchArticles();
-    } catch (err) {
-      console.error("Erreur suppression article :", err);
-      const msg =
-        err?.response?.data?.message ||
-        `Erreur lors de la suppression (${err?.response?.status || "réseau"}).`;
-      setErrorMsg(`❌ ${msg}`);
-    }
-  };
-
-  const resetForm = () => {
-    setEditingArticle(null);
-    setTitle("");
-    setContent("");
-    setImage(null);
-    setImagePreview(null);
-  };
-
-  const getPlainTextSnippet = (html, maxLength = 500) => {
-    const temp = document.createElement("div");
-    temp.innerHTML = html || "";
-    const text = temp.textContent || temp.innerText || "";
-    return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
-  };
+  if (loadingMe) return <div className="p-6">Chargement…</div>;
 
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">📚 Gestion des Articles</h1>
+    <div className="pt-[80px] px-6 pb-6 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Créer un article</h1>
 
-      {successMsg && <p className="text-green-600 mb-4">{successMsg}</p>}
-      {errorMsg && <p className="text-red-600 mb-4">{errorMsg}</p>}
-
-      {editingArticle && (
-        <div className="mb-6 p-4 border rounded bg-gray-50">
-          <h2 className="text-xl font-semibold mb-4">✏️ Modifier l'article</h2>
-
-          <div className="mb-3">
-            <label className="block font-medium">Titre</label>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div className="bg-white rounded border p-4 space-y-3">
+          <div>
+            <label className="block text-sm text-gray-700 mb-1">Titre *</label>
             <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded"
-              placeholder="Titre"
+              className="w-full border rounded px-3 py-2"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              required
             />
           </div>
 
-          <div className="mb-3">
-            <label className="block font-medium">Contenu</label>
+          <div>
+            <label className="block text-sm text-gray-700 mb-1">Contenu *</label>
             <textarea
-              rows="5"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded"
-              placeholder="Contenu"
+              className="w-full border rounded px-3 py-2 min-h-[160px]"
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
+              required
             />
           </div>
 
-          <div className="mb-3">
-            <label className="block font-medium">Nouvelle image (optionnelle)</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageChange}
-              className="w-full"
-            />
-            {imagePreview && (
+          <div>
+            <label className="block text-sm text-gray-700 mb-1">Image (optionnel)</label>
+            <input type="file" accept="image/*" onChange={onFileChange} />
+            {preview && (
               <img
-                src={imagePreview}
+                src={preview}
                 alt="Aperçu"
-                className="mt-3 rounded-lg border border-gray-300 max-h-64 object-cover shadow-sm"
+                className="mt-3 rounded-lg border max-h-56 object-cover"
               />
             )}
           </div>
 
-          <div className="flex gap-3">
-            <button
-              onClick={handleUpdate}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
-            >
-              💾 Enregistrer
-            </button>
-            <button
-              onClick={resetForm}
-              className="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded"
-            >
-              ❌ Annuler
-            </button>
+          {/* Métadonnées Play */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">Auteur (affiché)</label>
+              <input
+                className="w-full border rounded px-3 py-2"
+                value={form.authorName}
+                onChange={(e) => setForm({ ...form, authorName: e.target.value })}
+                placeholder="Ex: Service Communication"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">Éditeur</label>
+              <input
+                className="w-full border rounded px-3 py-2"
+                value={form.publisher}
+                onChange={(e) => setForm({ ...form, publisher: e.target.value })}
+                placeholder="Association Bellevue Dembeni"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm text-gray-700 mb-1">URL de la source (si reprise)</label>
+              <input
+                className="w-full border rounded px-3 py-2"
+                value={form.sourceUrl}
+                onChange={(e) => setForm({ ...form, sourceUrl: e.target.value })}
+                placeholder="https://... (obligatoire pour contenu gouvernemental repris)"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">Statut</label>
+              <select
+                className="w-full border rounded px-3 py-2"
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+              >
+                <option value="published">Publié</option>
+                <option value="draft">Brouillon</option>
+              </select>
+            </div>
           </div>
         </div>
-      )}
 
-      <h2 className="text-xl font-semibold mb-4">📄 Liste des articles</h2>
-      <ul className="space-y-4">
-        {articles.map((article) => (
-          <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
-            <h3 className="text-lg font-bold text-gray-800 mb-2">{article.title}</h3>
+        {/* Bloc visibilité / période / priorité */}
+        <VisibilityControls me={me} value={visibility} onChange={setVisibility} />
 
-            <img
-              src={
-                article.imageUrl
-                  ? article.imageUrl
-                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
-              }
-              alt={`Image de l'article ${article.title}`}
-              className="h-40 w-full object-cover rounded border mb-3"
-            />
-
-            <p className="text-gray-700 mb-2">
-              {getPlainTextSnippet(article.content, 500)}
-            </p>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleEditClick(article)}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
-              >
-                ✏️ Modifier
-              </button>
-              <button
-                onClick={() => handleDelete(article._id)}
-                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded"
-              >
-                🗑️ Supprimer
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+          >
+            {submitting ? "Création…" : "Créer l’article"}
+          </button>
+          <button
+            type="button"
+            className="px-4 py-2 rounded border"
+            onClick={() => {
+              setForm({
+                title: "",
+                content: "",
+                imageFile: null,
+                authorName: "",
+                publisher: "Association Bellevue Dembeni",
+                sourceUrl: "",
+                status: "published",
+              });
+              setPreview(null);
+            }}
+          >
+            Réinitialiser
+          </button>
+        </div>
+      </form>
     </div>
   );
-};
-
-export default ArticleListPage;
+}

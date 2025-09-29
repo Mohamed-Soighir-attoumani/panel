@@ -16,6 +16,7 @@ export default function ArticleCreate() {
   const [loadingMe, setLoadingMe] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [pageError, setPageError] = useState("");
 
   const [form, setForm] = useState({
     title: "",
@@ -40,16 +41,27 @@ export default function ArticleCreate() {
   useEffect(() => {
     (async () => {
       try {
-        // ✅ API_URL contient déjà /api
+        // IMPORTANT : API_URL inclut déjà /api -> /api/me
         const res = await axios.get(`${API_URL}/me`, { headers: buildAuthHeaders() });
         const user = res?.data?.user || null;
         setMe(user);
         if (user?.role === "admin") {
           setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
         }
-      } catch {
-        localStorage.removeItem("token");
-        window.location.assign("/login");
+        setPageError("");
+      } catch (err) {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          // Uniquement pour l'auth réellement invalide
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+          return;
+        }
+        // Réseau / 404 / autre : on n’ejecte PAS l’utilisateur
+        console.error("Erreur /me :", err);
+        setPageError(
+          "Impossible de vérifier votre session pour le moment. Réessayez plus tard ou actualisez la page."
+        );
       } finally {
         setLoadingMe(false);
       }
@@ -98,11 +110,11 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status); // draft/published
 
-      // ✅ API_URL contient déjà /api
+      // API_URL inclut déjà /api -> POST /api/articles
       const res = await axios.post(`${API_URL}/articles`, fd, {
         headers: {
           ...buildAuthHeaders(),
-          // Laisse axios définir le boundary de FormData
+          // Ne pas fixer Content-Type, axios s'en charge pour FormData (boundary)
         },
       });
 
@@ -120,6 +132,13 @@ export default function ArticleCreate() {
         setPreview(null);
       }
     } catch (err) {
+      const status = err?.response?.status;
+      if (status === 401 || status === 403) {
+        alert("Votre session a expiré. Veuillez vous reconnecter.");
+        localStorage.removeItem("token");
+        window.location.assign("/login");
+        return;
+      }
       console.error("Erreur création article:", err);
       alert(err?.response?.data?.message || "Erreur lors de la création");
     } finally {
@@ -132,6 +151,12 @@ export default function ArticleCreate() {
   return (
     <div className="pt-[80px] px-6 pb-6 max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Créer un article</h1>
+
+      {pageError && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
+          {pageError}
+        </div>
+      )}
 
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="bg-white rounded border p-4 space-y-3">

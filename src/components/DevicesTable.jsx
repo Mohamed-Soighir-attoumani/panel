@@ -1,16 +1,18 @@
 // src/components/DevicesTable.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import axios from "axios";
 import { API_URL } from "../config";
 
 const PAGE_SIZE = 10;
+
+// Normalise la base API (évite /api/api si API_URL inclut déjà /api)
+const BASE_API = API_URL.endsWith("/api") ? API_URL : `${API_URL}/api`;
 
 function fmtExact(d) {
   if (!d) return "—";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return "—";
 
-  // jj/mm/aaaa HH:MM:SS
   const str = new Intl.DateTimeFormat("fr-FR", {
     year: "numeric",
     month: "2-digit",
@@ -21,8 +23,7 @@ function fmtExact(d) {
     hour12: false,
   }).format(dt);
 
-  // Décalage local vs UTC
-  const offMin = -dt.getTimezoneOffset(); // minutes à ajouter à UTC pour obtenir locale
+  const offMin = -dt.getTimezoneOffset();
   const sign = offMin >= 0 ? "+" : "-";
   const hh = String(Math.floor(Math.abs(offMin) / 60)).padStart(2, "0");
   const mm = String(Math.abs(offMin) % 60).padStart(2, "0");
@@ -48,6 +49,27 @@ function downloadTextFile(filename, text) {
   URL.revokeObjectURL(url);
 }
 
+// Construit les headers : token + x-commune-id si applicable
+function buildHeaders() {
+  const headers = {};
+  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let me = null;
+  try {
+    me = JSON.parse(localStorage.getItem("me") || "null");
+  } catch {}
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = me.communeId;
+  }
+  if (me?.role === "superadmin") {
+    const selectedCid =
+      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    if (selectedCid) headers["x-commune-id"] = selectedCid;
+  }
+  return headers;
+}
+
 const DevicesTable = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -58,8 +80,14 @@ const DevicesTable = () => {
   const [sortDir, setSortDir] = useState("desc");
   const [page, setPage] = useState(1);
 
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") || "" : "";
-  const authHeaders = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
+  // Recalcule dynamiquement (si LS change)
+  const authHeaders = useMemo(buildHeaders, [
+    localStorage.getItem("token"),
+    localStorage.getItem("selectedCommuneId"),
+    localStorage.getItem("me"),
+  ]);
+
+  const unmountedRef = useRef(false);
 
   const handleAuthError = (e) => {
     const s = e?.response?.status;
@@ -78,31 +106,44 @@ const DevicesTable = () => {
     setErr("");
     setDebug("");
     try {
-      const res = await axios.get(`${API_URL}/api/devices`, {
+      const res = await axios.get(`${BASE_API}/devices`, {
         headers: { ...authHeaders, "Cache-Control": "no-cache" },
         params: { page, pageSize: PAGE_SIZE },
         timeout: 20000,
       });
-      const list = Array.isArray(res.data?.items) ? res.data.items : [];
-      setItems(list);
+
+      const list =
+        Array.isArray(res.data?.items)
+          ? res.data.items
+          : Array.isArray(res.data)
+          ? res.data
+          : [];
+
+      if (!unmountedRef.current) setItems(list);
     } catch (e) {
       if (handleAuthError(e)) return;
       const status = e?.response?.status;
       const data = e?.response?.data;
       const msg = data?.message || e?.message || "Erreur inconnue";
-      const full = `[GET ${API_URL}/api/devices] status=${status || "?"} message="${msg}"`;
+      const full = `[GET ${BASE_API}/devices] status=${status || "?"} message="${msg}"`;
       console.error(full, data);
-      setDebug(full);
-      setErr("Impossible de charger les appareils.");
+      if (!unmountedRef.current) {
+        setDebug(full);
+        setErr("Impossible de charger les appareils.");
+      }
     } finally {
-      setLoading(false);
+      if (!unmountedRef.current) setLoading(false);
     }
-  }, [API_URL, authHeaders, page]);
+  }, [authHeaders, page]);
 
   useEffect(() => {
+    unmountedRef.current = false;
     fetchDevices();
-    const id = setInterval(fetchDevices, 30000); // auto-refresh
-    return () => clearInterval(id);
+    const id = setInterval(fetchDevices, 30000);
+    return () => {
+      unmountedRef.current = true;
+      clearInterval(id);
+    };
   }, [fetchDevices]);
 
   const filtered = useMemo(() => {

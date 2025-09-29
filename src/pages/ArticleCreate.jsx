@@ -11,6 +11,44 @@ function buildAuthHeaders() {
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
+// Endpoints possibles pour /me (certains backends utilisent /auth/me, /users/me, etc.)
+const ME_ENDPOINT_CANDIDATES = ["/me", "/auth/me", "/users/me", "/account/me"];
+
+// clé de cache pour ne plus chercher à chaque fois
+const ME_ENDPOINT_CACHE_KEY = "securidem:meEndpoint";
+
+async function resolveMeEndpoint() {
+  // 1) si on a déjà résolu, on réutilise
+  const cached = localStorage.getItem(ME_ENDPOINT_CACHE_KEY);
+  if (cached) return cached;
+
+  const headers = buildAuthHeaders();
+
+  // 2) on essaie en série les endpoints candidats
+  for (const path of ME_ENDPOINT_CANDIDATES) {
+    try {
+      const res = await axios.get(`${API_URL}${path}`, {
+        headers,
+        validateStatus: () => true,
+        timeout: 12000,
+      });
+      if (res.status === 200 && (res.data?.user || res.data?.role || res.data?.email)) {
+        localStorage.setItem(ME_ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+      // si 401/403 sur un endpoint, c'est sûrement le bon mais token invalide → on le retient quand même
+      if (res.status === 401 || res.status === 403) {
+        localStorage.setItem(ME_ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+    } catch {
+      // on essaie le suivant
+    }
+  }
+  // 3) par défaut on retourne /me (même si ça 404), le composant gèrera l’erreur
+  return "/me";
+}
+
 export default function ArticleCreate() {
   const [me, setMe] = useState(null);
   const [loadingMe, setLoadingMe] = useState(true);
@@ -47,33 +85,43 @@ export default function ArticleCreate() {
     setDiag({ status: null, message: "", kind: "" });
 
     try {
-      // IMPORTANT : API_URL inclut déjà /api -> /api/me
-      const res = await axios.get(`${API_URL}/me`, {
+      const mePath = await resolveMeEndpoint(); // ← trouve le bon chemin
+      const res = await axios.get(`${API_URL}${mePath}`, {
         headers: buildAuthHeaders(),
-        // On veut lire même les 4xx/5xx pour le diagnostic
         validateStatus: () => true,
         timeout: 15000,
       });
 
       if (res.status === 200 && res.data) {
-        const user = res?.data?.user || null;
-        setMe(user);
-        if (user?.role === "admin") {
-          setVisibility((v) => ({
-            ...v,
-            communeId: user.communeId || "",
-            visibility: "local",
-          }));
+        const user =
+          res?.data?.user ||
+          // parfois le backend renvoie directement l’utilisateur
+          (res?.data?.role || res?.data?.email ? res.data : null);
+
+        if (!user) {
+          setPageError(
+            "Impossible de vérifier votre session pour le moment. Réessayez plus tard ou actualisez la page."
+          );
+          setDiag({ status: 200, message: "Réponse inattendue du serveur", kind: "http" });
+        } else {
+          setMe(user);
+          if (user?.role === "admin") {
+            setVisibility((v) => ({
+              ...v,
+              communeId: user.communeId || "",
+              visibility: "local",
+            }));
+          }
+          setPageError("");
+          setDiag({ status: 200, message: "OK", kind: "ok" });
         }
-        setPageError("");
-        setDiag({ status: 200, message: "OK", kind: "ok" });
       } else if (res.status === 401 || res.status === 403) {
         // Auth réellement invalide -> on déconnecte
         localStorage.removeItem("token");
+        localStorage.removeItem(ME_ENDPOINT_CACHE_KEY);
         window.location.assign("/login");
         return;
       } else {
-        // Autres erreurs côté serveur (404/500…)
         const msg =
           res?.data?.message ||
           res?.statusText ||
@@ -85,7 +133,6 @@ export default function ArticleCreate() {
         console.error("GET /me error:", res.status, msg, res.data);
       }
     } catch (err) {
-      // Erreur réseau/CORS/timeout
       const isTimeout = err?.code === "ECONNABORTED";
       const msg = isTimeout
         ? "Délai dépassé (timeout)."
@@ -146,7 +193,7 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status); // draft/published
 
-      // API_URL inclut déjà /api -> POST /api/articles
+      // POST /api/articles (API_URL contient déjà /api)
       const res = await axios.post(`${API_URL}/articles`, fd, {
         headers: {
           ...buildAuthHeaders(),
@@ -192,14 +239,14 @@ export default function ArticleCreate() {
   };
 
   const testMe = async () => {
-    // Petit bouton de test pour voir ce que renvoie /me
     try {
-      const res = await axios.get(`${API_URL}/me`, {
+      const mePath = await resolveMeEndpoint();
+      const res = await axios.get(`${API_URL}${mePath}`, {
         headers: buildAuthHeaders(),
         validateStatus: () => true,
       });
-      console.log("[TEST /me] status:", res.status, "data:", res.data);
-      alert(`Test /me → HTTP ${res.status}`);
+      console.log("[TEST /me] path:", mePath, "status:", res.status, "data:", res.data);
+      alert(`Test ${mePath} → HTTP ${res.status}`);
     } catch (e) {
       console.error("[TEST /me] exception:", e);
       alert("Test /me : exception réseau (voir console).");
@@ -215,17 +262,12 @@ export default function ArticleCreate() {
       {pageError && (
         <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
           <div className="font-semibold mb-1">{pageError}</div>
-          {/* Bloc diagnostic succinct pour t’aider à cibler le problème */}
           <div className="text-sm text-amber-900">
             {diag.kind === "http" && (
               <>Détail : HTTP {diag.status} – {diag.message}</>
             )}
-            {diag.kind === "network" && (
-              <>Détail : erreur réseau/CORS – {diag.message}</>
-            )}
-            {diag.kind === "timeout" && (
-              <>Détail : délai dépassé (timeout).</>
-            )}
+            {diag.kind === "network" && <>Détail : erreur réseau/CORS – {diag.message}</>}
+            {diag.kind === "timeout" && <>Détail : délai dépassé (timeout).</>}
           </div>
           <div className="mt-2 flex gap-2">
             <button

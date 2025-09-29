@@ -1,145 +1,216 @@
-// src/pages/ArticleCreate.jsx
-import React, { useEffect, useState } from "react";
-import axios from "axios";
-import VisibilityControls from "../components/VisibilityControls";
+import React, { useState, useEffect } from "react";
+import api from "../api"; // 👈 remplace axios direct
 import { API_URL } from "../config";
 
-function buildAuthHeaders() {
-  const token = localStorage.getItem("token") || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-export default function ArticleCreate() {
-  const [me, setMe] = useState(null);
-  const [loadingMe, setLoadingMe] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-
-  const [form, setForm] = useState({
-    title: "",
-    content: "",
-    imageFile: null,
-  });
-
-  const [visibility, setVisibility] = useState({
-    visibility: "local",
-    communeId: "",
-    audienceCommunes: [],
-    priority: "normal",
-    startAt: "",
-    endAt: "",
-  });
+const ArticleListPage = () => {
+  const [articles, setArticles] = useState([]);
+  const [editingArticle, setEditingArticle] = useState(null);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [successMsg, setSuccessMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await axios.get(`${API_URL}/api/me`, { headers: buildAuthHeaders() });
-        const user = res?.data?.user || null;
-        setMe(user);
-        if (user?.role === "admin") {
-          setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
-        }
-      } catch {
-        localStorage.removeItem("token");
-        window.location.assign("/login");
-      } finally {
-        setLoadingMe(false);
-      }
-    })();
+    fetchArticles();
   }, []);
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    if (!form.title || !form.content) return alert("Titre et contenu requis");
-    setSubmitting(true);
-
+  const fetchArticles = async () => {
     try {
-      const fd = new FormData();
-      fd.append("title", form.title);
-      fd.append("content", form.content);
-      if (form.imageFile) fd.append("image", form.imageFile);
-
-      fd.append("visibility", visibility.visibility);
-      if (visibility.communeId) fd.append("communeId", visibility.communeId);
-      if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
-        visibility.audienceCommunes.forEach((c) => fd.append("audienceCommunes[]", c));
-      }
-      fd.append("priority", visibility.priority);
-      if (visibility.startAt) fd.append("startAt", visibility.startAt);
-      if (visibility.endAt) fd.append("endAt", visibility.endAt);
-
-      const res = await axios.post(`${API_URL}/api/articles`, fd, {
-        headers: { ...buildAuthHeaders() },
-      });
-
-      if (res.status >= 200 && res.status < 300) {
-        alert("Article créé ✅");
-        setForm({ title: "", content: "", imageFile: null });
-      }
+      const res = await api.get(`/api/articles`);
+      setArticles(res.data);
+      setErrorMsg("");
     } catch (err) {
-      console.error("Erreur création article:", err);
-      alert(err?.response?.data?.message || "Erreur lors de la création");
-    } finally {
-      setSubmitting(false);
+      console.error("Erreur chargement articles :", err);
+      setErrorMsg(
+        `❌ Impossible de charger les articles (${err?.response?.status || "réseau"}).`
+      );
     }
   };
 
-  if (loadingMe) return <div className="p-6">Chargement…</div>;
+  const handleEditClick = (article) => {
+    setEditingArticle(article);
+    setTitle(article.title || "");
+    setContent(article.content || "");
+    setImage(null);
+    setImagePreview(article.imageUrl || null);
+    setSuccessMsg("");
+    setErrorMsg("");
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    setImage(file || null);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setImagePreview(reader.result);
+      reader.readAsDataURL(file);
+    } else {
+      setImagePreview(null);
+    }
+  };
+
+  const handleUpdate = async () => {
+    if (!editingArticle?._id) return;
+
+    const formData = new FormData();
+    formData.append("title", (title || "").trim());
+    formData.append("content", (content || "").trim());
+    if (image) formData.append("image", image);
+
+    try {
+      await api.put(`/api/articles/${editingArticle._id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setSuccessMsg("✅ Article modifié avec succès.");
+      resetForm();
+      fetchArticles();
+    } catch (err) {
+      console.error("Erreur mise à jour article :", err);
+      const msg =
+        err?.response?.data?.message ||
+        `Erreur lors de la mise à jour (${err?.response?.status || "réseau"}).`;
+      setErrorMsg(`❌ ${msg}`);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Supprimer cet article ?")) return;
+    try {
+      await api.delete(`/api/articles/${id}`);
+      setSuccessMsg("✅ Article supprimé.");
+      fetchArticles();
+    } catch (err) {
+      console.error("Erreur suppression article :", err);
+      const msg =
+        err?.response?.data?.message ||
+        `Erreur lors de la suppression (${err?.response?.status || "réseau"}).`;
+      setErrorMsg(`❌ ${msg}`);
+    }
+  };
+
+  const resetForm = () => {
+    setEditingArticle(null);
+    setTitle("");
+    setContent("");
+    setImage(null);
+    setImagePreview(null);
+  };
+
+  const getPlainTextSnippet = (html, maxLength = 500) => {
+    const temp = document.createElement("div");
+    temp.innerHTML = html || "";
+    const text = temp.textContent || temp.innerText || "";
+    return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
+  };
 
   return (
-    <div className="pt-[80px] px-6 pb-6 max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Créer un article</h1>
+    <div className="max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">
+      <h1 className="text-3xl font-bold text-gray-800 mb-6">📚 Gestion des Articles</h1>
 
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div className="bg-white rounded border p-4 space-y-3">
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">Titre *</label>
+      {successMsg && <p className="text-green-600 mb-4">{successMsg}</p>}
+      {errorMsg && <p className="text-red-600 mb-4">{errorMsg}</p>}
+
+      {editingArticle && (
+        <div className="mb-6 p-4 border rounded bg-gray-50">
+          <h2 className="text-xl font-semibold mb-4">✏️ Modifier l'article</h2>
+
+          <div className="mb-3">
+            <label className="block font-medium">Titre</label>
             <input
-              className="w-full border rounded px-3 py-2"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-              required
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+              placeholder="Titre"
             />
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">Contenu *</label>
+          <div className="mb-3">
+            <label className="block font-medium">Contenu</label>
             <textarea
-              className="w-full border rounded px-3 py-2 min-h-[160px]"
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              required
+              rows="5"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded"
+              placeholder="Contenu"
             />
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">Image (optionnel)</label>
+          <div className="mb-3">
+            <label className="block font-medium">Nouvelle image (optionnelle)</label>
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setForm({ ...form, imageFile: e.target.files?.[0] || null })}
+              onChange={handleImageChange}
+              className="w-full"
             />
+            {imagePreview && (
+              <img
+                src={imagePreview}
+                alt="Aperçu"
+                className="mt-3 rounded-lg border border-gray-300 max-h-64 object-cover shadow-sm"
+              />
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleUpdate}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
+            >
+              💾 Enregistrer
+            </button>
+            <button
+              onClick={resetForm}
+              className="bg-gray-300 hover:bg-gray-400 px-4 py-2 rounded"
+            >
+              ❌ Annuler
+            </button>
           </div>
         </div>
+      )}
 
-        <VisibilityControls me={me} value={visibility} onChange={setVisibility} />
+      <h2 className="text-xl font-semibold mb-4">📄 Liste des articles</h2>
+      <ul className="space-y-4">
+        {articles.map((article) => (
+          <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
+            <h3 className="text-lg font-bold text-gray-800 mb-2">{article.title}</h3>
 
-        <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? "Création…" : "Créer l’article"}
-          </button>
-          <button
-            type="button"
-            className="px-4 py-2 rounded border"
-            onClick={() => setForm({ title: "", content: "", imageFile: null })}
-          >
-            Réinitialiser
-          </button>
-        </div>
-      </form>
+            <img
+              src={
+                article.imageUrl
+                  ? article.imageUrl
+                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
+              }
+              alt={`Image de l'article ${article.title}`}
+              className="h-40 w-full object-cover rounded border mb-3"
+            />
+
+            <p className="text-gray-700 mb-2">
+              {getPlainTextSnippet(article.content, 500)}
+            </p>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleEditClick(article)}
+                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+              >
+                ✏️ Modifier
+              </button>
+              <button
+                onClick={() => handleDelete(article._id)}
+                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded"
+              >
+                🗑️ Supprimer
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
-}
+};
+
+export default ArticleListPage;

@@ -1,3 +1,4 @@
+// src/components/Layout.jsx
 import React from "react";
 import { Outlet } from "react-router-dom";
 import Header from "./Header";
@@ -5,8 +6,8 @@ import Sidebar from "./Sidebar";
 
 /**
  * Layout:
- * - Header fixé en haut (h-16)
- * - Sous le header: un grid 2 colonnes (sidebar, contenu) à partir de md
+ * - Header fixé en haut (≈ 56px)
+ * - Sous le header: grid 2 colonnes (sidebar, contenu) à partir de md
  * - Une seule scrollbar pour toute la page (pas d'overflow caché)
  */
 const Layout = () => {
@@ -17,11 +18,11 @@ const Layout = () => {
         <Header />
       </div>
 
-      {/* Espace sous le header */}
-      <div className="pt-16">
+      {/* Espace sous le header : exactement 56px pour coller à Header.jsx */}
+      <div className="pt-[56px]">
         {/* Grille: sidebar + contenu à partir de md */}
         <div className="mx-auto w-full md:grid md:grid-cols-[16rem,1fr] md:gap-0">
-          {/* Sidebar (statique sur desktop, drawer sur mobile) */}
+          {/* Sidebar (statique sur desktop, drawer géré en mobile dans Sidebar) */}
           <Sidebar />
 
           {/* Contenu */}

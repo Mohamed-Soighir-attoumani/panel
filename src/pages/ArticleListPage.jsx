@@ -1,14 +1,32 @@
+// src/pages/ArticleListPage.jsx
 import React, { useState, useEffect } from "react";
-import api from "../api"; // 👈 remplace axios direct
+import api from "../api"; // instance axios avec baseURL + token interceptor
 import { API_URL } from "../config";
+
+const toFullUrl = (p) => {
+  if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
+  if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
+  return `${API_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
+};
+
+const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
 const ArticleListPage = () => {
   const [articles, setArticles] = useState([]);
   const [editingArticle, setEditingArticle] = useState(null);
+
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [image, setImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
+
+  // Métadonnées Play (édition)
+  const [authorName, setAuthorName] = useState("");
+  const [publisher, setPublisher] = useState("Association Bellevue Dembeni");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [status, setStatus] = useState("published"); // draft|published
+
+  // Visuels
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -18,8 +36,10 @@ const ArticleListPage = () => {
 
   const fetchArticles = async () => {
     try {
+      // côté panel, /api/articles (routes/articles.js) renvoie un tableau simple
       const res = await api.get(`/api/articles`);
-      setArticles(res.data);
+      const data = Array.isArray(res.data) ? res.data : (res.data?.items || []);
+      setArticles(data);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement articles :", err);
@@ -31,10 +51,17 @@ const ArticleListPage = () => {
 
   const handleEditClick = (article) => {
     setEditingArticle(article);
+
     setTitle(article.title || "");
     setContent(article.content || "");
     setImage(null);
-    setImagePreview(article.imageUrl || null);
+    setImagePreview(article.imageUrl ? toFullUrl(article.imageUrl) : null);
+
+    setAuthorName(article.authorName || "");
+    setPublisher(article.publisher || "Association Bellevue Dembeni");
+    setSourceUrl(article.sourceUrl || "");
+    setStatus(article.status || "published");
+
     setSuccessMsg("");
     setErrorMsg("");
   };
@@ -54,10 +81,21 @@ const ArticleListPage = () => {
   const handleUpdate = async () => {
     if (!editingArticle?._id) return;
 
+    if (sourceUrl && !isHttpUrl(sourceUrl)) {
+      setErrorMsg("❌ L’URL de la source doit commencer par http(s)://");
+      return;
+    }
+
     const formData = new FormData();
     formData.append("title", (title || "").trim());
     formData.append("content", (content || "").trim());
+
     if (image) formData.append("image", image);
+    // métadonnées Play
+    formData.append("authorName", (authorName || "").trim());
+    formData.append("publisher", (publisher || "Association Bellevue Dembeni").trim());
+    formData.append("status", status === "draft" ? "draft" : "published");
+    if (sourceUrl) formData.append("sourceUrl", sourceUrl.trim());
 
     try {
       await api.put(`/api/articles/${editingArticle._id}`, formData, {
@@ -96,6 +134,10 @@ const ArticleListPage = () => {
     setContent("");
     setImage(null);
     setImagePreview(null);
+    setAuthorName("");
+    setPublisher("Association Bellevue Dembeni");
+    setSourceUrl("");
+    setStatus("published");
   };
 
   const getPlainTextSnippet = (html, maxLength = 500) => {
@@ -103,6 +145,18 @@ const ArticleListPage = () => {
     temp.innerHTML = html || "";
     const text = temp.textContent || temp.innerText || "";
     return text.length > maxLength ? text.slice(0, maxLength) + "..." : text;
+    // (évite tout HTML pour l’aperçu)
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("fr-FR", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   };
 
   return (
@@ -138,14 +192,56 @@ const ArticleListPage = () => {
             />
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block font-medium">Auteur (affiché)</label>
+              <input
+                type="text"
+                value={authorName}
+                onChange={(e) => setAuthorName(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+                placeholder="Ex: Service Communication"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium">Éditeur</label>
+              <input
+                type="text"
+                value={publisher}
+                onChange={(e) => setPublisher(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+                placeholder="Association Bellevue Dembeni"
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block font-medium">URL de la source (si reprise)</label>
+              <input
+                type="url"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+                placeholder="https://... (obligatoire pour contenu gouvernemental repris)"
+              />
+            </div>
+
+            <div>
+              <label className="block font-medium">Statut</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded"
+              >
+                <option value="published">Publié</option>
+                <option value="draft">Brouillon</option>
+              </select>
+            </div>
+          </div>
+
           <div className="mb-3">
             <label className="block font-medium">Nouvelle image (optionnelle)</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleImageChange}
-              className="w-full"
-            />
+            <input type="file" accept="image/*" onChange={handleImageChange} className="w-full" />
             {imagePreview && (
               <img
                 src={imagePreview}
@@ -176,21 +272,50 @@ const ArticleListPage = () => {
       <ul className="space-y-4">
         {articles.map((article) => (
           <li key={article._id} className="p-4 bg-gray-100 rounded shadow-sm">
-            <h3 className="text-lg font-bold text-gray-800 mb-2">{article.title}</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-bold text-gray-800">{article.title}</h3>
+              <span
+                className={
+                  "text-xs px-2 py-1 rounded " +
+                  (article.status === "draft"
+                    ? "bg-yellow-100 text-yellow-800"
+                    : "bg-green-100 text-green-800")
+                }
+                title="Statut éditorial"
+              >
+                {article.status || "published"}
+              </span>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-2">
+              {formatDate(article.publishedAt || article.createdAt)}
+              {(article.authorName || article.publisher)
+                ? ` · ${article.authorName || article.publisher}`
+                : ""}
+            </p>
 
             <img
-              src={
-                article.imageUrl
-                  ? article.imageUrl
-                  : "https://via.placeholder.com/600x200.png?text=Aucune+image"
-              }
+              src={toFullUrl(article.imageUrl)}
               alt={`Image de l'article ${article.title}`}
               className="h-40 w-full object-cover rounded border mb-3"
+              loading="lazy"
             />
 
-            <p className="text-gray-700 mb-2">
+            <p className="text-gray-700 mb-3">
               {getPlainTextSnippet(article.content, 500)}
             </p>
+
+            {!!article.sourceUrl && (
+              <a
+                href={article.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-blue-600 underline text-sm mb-2 inline-block"
+                title="Voir la source officielle"
+              >
+                Voir la source
+              </a>
+            )}
 
             <div className="flex gap-2">
               <button

@@ -96,63 +96,113 @@ const DashboardPage = () => {
     return false;
   }, []);
 
+  // --- NOUVEAU: fetchData tolérant, sans throw global
   const fetchData = useCallback(async () => {
     if (loadingMe) return;
+    const headers = buildHeaders(me);
+    const qs = period === "all" ? "" : `?period=${period}`;
+
+    let incOk = false;
+    let notifOk = false;
+
     try {
-      const headers = buildHeaders(me);
-      const qs = period === "all" ? "" : `?period=${period}`;
+      // Incidents
+      const incidentRes = await api.get(`/api/incidents${qs}`, {
+        headers,
+        validateStatus: () => true,
+      });
 
-      // Appels via api (baseURL sans /api) -> on préfixe /api ici
-      const [incidentRes, notifRes] = await Promise.all([
-        api.get(`/api/incidents${qs}`, { headers, validateStatus: () => true }),
-        api.get(`/api/notifications`, { headers, validateStatus: () => true }),
-      ]);
-
-      if (incidentRes.status >= 400 && !handleAuthError({ response: { status: incidentRes.status } })) {
-        throw new Error(`Incidents HTTP ${incidentRes.status}`);
+      if (incidentRes.status === 200) {
+        const d = incidentRes.data;
+        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
+        setIncidents(arr);
+        incOk = true;
+      } else if (incidentRes.status === 404) {
+        // Endpoint non présent : mode dégradé silencieux
+        console.warn("[dashboard] /api/incidents introuvable (404) → incidents=[]");
+        setIncidents([]);
+        incOk = true;
+      } else if (!handleAuthError({ response: { status: incidentRes.status } })) {
+        console.warn("[dashboard] incidents HTTP", incidentRes.status, incidentRes.data);
+        setIncidents([]); // fail-soft
       }
-      if (notifRes.status >= 400 && !handleAuthError({ response: { status: notifRes.status } })) {
-        throw new Error(`Notifications HTTP ${notifRes.status}`);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        console.error("Erreur fetch incidents:", err);
+        setIncidents([]); // fail-soft
       }
+    }
 
-      const realIncidents = Array.isArray(incidentRes.data) ? incidentRes.data : [];
-      const realNotifications = Array.isArray(notifRes.data) ? notifRes.data : [];
+    try {
+      // Notifications
+      const notifRes = await api.get(`/api/notifications`, {
+        headers,
+        validateStatus: () => true,
+      });
 
-      setIncidents(realIncidents);
-      setNotifications(realNotifications);
+      if (notifRes.status === 200) {
+        const d = notifRes.data;
+        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
+        setNotifications(arr);
+        notifOk = true;
+      } else if (notifRes.status === 404) {
+        console.warn("[dashboard] /api/notifications introuvable (404) → notifications=[]");
+        setNotifications([]);
+        notifOk = true;
+      } else if (!handleAuthError({ response: { status: notifRes.status } })) {
+        console.warn("[dashboard] notifications HTTP", notifRes.status, notifRes.data);
+        setNotifications([]); // fail-soft
+      }
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        console.error("Erreur fetch notifications:", err);
+        setNotifications([]); // fail-soft
+      }
+    }
 
-      setActivity([
-        ...realIncidents.slice(0, 3).map((inc) => {
-          const t = inc.type || inc.title || "Inconnu";
+    // Activité (ne plante jamais)
+    try {
+      const realIncidents = incOk ? incidents : [];
+      const realNotifications = notifOk ? notifications : [];
+
+      const nextActivity = [
+        ...(realIncidents || []).slice(0, 3).map((inc) => {
+          const t = inc?.type || inc?.title || "Inconnu";
           return {
             type: "incident",
             text: `Incident "${t}" signalé`,
-            time: inc.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
+            time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
           };
         }),
-        ...realNotifications.slice(0, 3).map((notif) => ({
+        ...(realNotifications || []).slice(0, 3).map((notif) => ({
           type: "notification",
-          text: `Notification: ${notif.title || notif.message || "Sans titre"}`,
-          time: notif.createdAt
-            ? new Date(notif.createdAt).toLocaleString("fr-FR")
-            : "Date inconnue",
+          text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
+          time: notif?.createdAt ? new Date(notif.createdAt).toLocaleString("fr-FR") : "Date inconnue",
         })),
-      ]);
-      setBannerError("");
-    } catch (err) {
-      if (!handleAuthError(err)) {
-        console.error("Erreur fetchData:", err);
-        setBannerError("Erreur lors du chargement des données.");
-      }
+      ];
+      setActivity(nextActivity);
+    } catch (e) {
+      console.warn("Construction activité échouée:", e);
+      setActivity([]);
     }
-  }, [handleAuthError, loadingMe, me, period]);
+
+    // Bannière: afficher seulement si les 2 ont VRAIMENT échoué
+    if (!incOk && !notifOk) {
+      setBannerError("Erreur lors du chargement des données.");
+    } else {
+      // on efface l’erreur si au moins une source est OK
+      setBannerError((prev) =>
+        prev && prev.includes("chargement des données") ? "" : prev
+      );
+    }
+  }, [handleAuthError, loadingMe, me, period, incidents, notifications]);
 
   const fetchDeviceCount = useCallback(async () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
 
-      // on tente d'abord l'endpoint moderne /count (admin)
+      // endpoint moderne /count (admin)
       const res = await api.get(`/api/devices/count?activeDays=30`, {
         headers,
         validateStatus: () => true,
@@ -164,7 +214,7 @@ const DashboardPage = () => {
         return;
       }
 
-      // --- Fallback sur anciennes versions : /api/devices (lecture du total)
+      // Fallback /api/devices (lecture total)
       if (res.status === 404) {
         const fallback = await api.get(`/api/devices?page=1&pageSize=1`, {
           headers,
@@ -172,21 +222,17 @@ const DashboardPage = () => {
         });
         if (fallback.status === 200 && typeof fallback.data?.total === "number") {
           setDeviceCount(fallback.data.total);
-          // pas d'alerte si on a un fallback OK
           setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
           return;
         }
       }
 
-      // autres erreurs : on n’éjecte pas l’utilisateur, on journalise
       if (!handleAuthError({ response: { status: res.status } })) {
         console.warn("devices/count non disponible, code:", res.status);
-        // On ne met pas de bannière agressive pour ce KPI uniquement
       }
     } catch (err) {
       if (!handleAuthError(err)) {
         console.error("Erreur fetchDeviceCount:", err);
-        // pas de bannière bloquante pour ce KPI
       }
     }
   }, [handleAuthError, loadingMe, me]);
@@ -205,7 +251,7 @@ const DashboardPage = () => {
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
     for (const inc of incidents) {
-      const raw = inc.type || inc.title || "Inconnu";
+      const raw = inc?.type || inc?.title || "Inconnu";
       const { key, label } = canonicalizeLabel(raw);
       const entry = map.get(key) || { label, count: 0 };
       entry.count += 1;
@@ -295,7 +341,7 @@ const DashboardPage = () => {
 
   if (loadingMe) {
     return <div className="p-6">Chargement…</div>;
-    }
+  }
 
   return (
     <div className="p-4 sm:p-6">
@@ -340,7 +386,10 @@ const DashboardPage = () => {
           )}
 
           <button
-            onClick={() => { fetchData(); fetchDeviceCount(); }}
+            onClick={() => {
+              fetchData();
+              fetchDeviceCount();
+            }}
             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
           >
             🔄 Rafraîchir

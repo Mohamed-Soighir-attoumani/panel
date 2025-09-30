@@ -3,48 +3,20 @@ import React, { useState, useEffect } from "react";
 import api from "../api";
 import { BASE_URL } from "../config";
 
-const ENDPOINT_CACHE_KEY = "securidem:articlesEndpoint";
-const CANDIDATES = ["/api/articles", "/articles"]; // essaie avec puis sans /api
+/** Chemin API fixe (notre axios a baseURL SANS /api) */
+const ARTICLES_ENDPOINT = "/api/articles";
 
+/** Construit une URL d'image fiable (si relative) */
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
-  return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
+  // Le backend sert /uploads à la racine (pas sous /api)
+  return `${BASE_URL.replace(/\/$/, "")}${p?.startsWith("/") ? "" : "/"}${p || ""}`;
 };
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
-// Découvre l'endpoint qui répond et met en cache
-async function resolveArticlesEndpoint() {
-  const cached = localStorage.getItem(ENDPOINT_CACHE_KEY);
-  if (cached) return cached;
-
-  for (const path of CANDIDATES) {
-    try {
-      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
-      // 200 avec tableau => OK
-      if (res.status === 200 && (Array.isArray(res.data) || res.data?.items)) {
-        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-      // 401/403 => chemin correct mais auth requise => on retient quand même
-      if (res.status === 401 || res.status === 403) {
-        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-    } catch {
-      // on tente le suivant
-    }
-  }
-  // défaut si tout échoue
-  return "/api/articles";
-}
-
 const ArticleListPage = () => {
-  const [endpoint, setEndpoint] = useState(
-    localStorage.getItem(ENDPOINT_CACHE_KEY) || "/api/articles"
-  );
-
   const [articles, setArticles] = useState([]);
   const [editingArticle, setEditingArticle] = useState(null);
 
@@ -63,28 +35,22 @@ const ArticleListPage = () => {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    (async () => {
-      const ep = await resolveArticlesEndpoint();
-      setEndpoint(ep);
-      await fetchArticles(ep);
-    })();
+    fetchArticles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchArticles = async (ep = endpoint) => {
+  const fetchArticles = async () => {
     try {
-      const res = await api.get(ep);
+      // IMPORTANT : on cible /api/articles car baseURL axios n'a pas /api
+      const res = await api.get(ARTICLES_ENDPOINT);
       const data = Array.isArray(res.data) ? res.data : res.data?.items || [];
       setArticles(data);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement articles :", err?.response?.status, err?.message);
-      const status = err?.response?.status;
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Impossible de charger les articles";
-      setErrorMsg(`❌ ${msg} (${status || "réseau"}).`);
+      setErrorMsg(
+        `❌ Impossible de charger les articles (${err?.response?.status || "réseau"}).`
+      );
     }
   };
 
@@ -135,7 +101,7 @@ const ArticleListPage = () => {
     if (sourceUrl) formData.append("sourceUrl", sourceUrl.trim());
 
     try {
-      await api.put(`${endpoint}/${editingArticle._id}`, formData);
+      await api.put(`${ARTICLES_ENDPOINT}/${editingArticle._id}`, formData);
       setSuccessMsg("✅ Article modifié avec succès.");
       resetForm();
       fetchArticles();
@@ -151,7 +117,7 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await api.delete(`${endpoint}/${id}`);
+      await api.delete(`${ARTICLES_ENDPOINT}/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
@@ -372,11 +338,6 @@ const ArticleListPage = () => {
           </li>
         ))}
       </ul>
-
-      {/* petit debug utile */}
-      <p className="text-xs text-gray-400 mt-6">
-        Endpoint articles détecté : <code>{endpoint}</code>
-      </p>
     </div>
   );
 };

@@ -48,21 +48,22 @@ const GlobalIncidentMap = ({ incidents }) => {
 };
 
 // === helper headers ===
-function buildHeaders(me) {
+// ⬇️ ajoute systématiquement x-commune-id selon le rôle
+function buildHeaders(me, selectedCommuneId) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
+  if (me?.role === "superadmin" && selectedCommuneId) headers["x-commune-id"] = selectedCommuneId;
   return headers;
 }
 
-// === helper params (communeId côté requêtes) ===
+// === helper params (on garde le support côté serveur si utilisé) ===
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
-  // Admin: force sa commune
   if (me?.role === "admin" && me?.communeId) {
     params.communeId = me.communeId;
   }
-  // Superadmin: applique le filtre si choisi
   if (me?.role === "superadmin" && selectedCommuneId) {
     params.communeId = selectedCommuneId;
   }
@@ -116,18 +117,15 @@ const IncidentPage = () => {
           setMe(user);
           localStorage.setItem("me", JSON.stringify(user));
         } else if (res.status === 401 || res.status === 403) {
-          // Only logout on true auth errors
           localStorage.removeItem("token");
           window.location.href = "/login";
           return;
         } else {
           console.warn("GET /me non-200:", res.status, res.data);
-          // ne pas déconnecter sur 404/500 réseau, on laisse accéder en mode dégradé
           setMe(null);
         }
       } catch (e) {
         console.error("GET /me error:", e);
-        // ne pas déconnecter brutalement sur erreur réseau; proposer le login si actions protégées échouent
         setMe(null);
       } finally {
         setLoadingMe(false);
@@ -141,7 +139,6 @@ const IncidentPage = () => {
       (async () => {
         try {
           const headers = buildHeaders(me);
-          // 1er essai: /api/communes
           let list = [];
           try {
             const r = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
@@ -154,7 +151,6 @@ const IncidentPage = () => {
               : [];
             list = arr;
           } catch {
-            // Fallback si reverse proxy: alias public sans /api
             const baseNoApi = API_URL.replace(/\/api\/?$/, "");
             const r2 = await axios.get(`${baseNoApi}/communes`, { headers, timeout: 15000 });
             const arr2 = Array.isArray(r2.data)
@@ -256,7 +252,7 @@ const IncidentPage = () => {
   const fetchIncidents = useCallback(async () => {
     if (loadingMe) return;
     try {
-      const headers = buildHeaders(me);
+      const headers = buildHeaders(me, selectedCommuneId); // ⬅️ ajoute x-commune-id
       const params = buildParams(me, selectedCommuneId, {
         period: periodFilter || undefined,
       });
@@ -269,22 +265,18 @@ const IncidentPage = () => {
       });
 
       if (response.status === 401 || response.status === 403) {
-        // Auth expirée
         localStorage.removeItem("token");
         window.location.href = "/login";
         return;
       }
 
       let data = Array.isArray(response.data) ? response.data : [];
-      // Tri : plus récent en premier
       data = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-      // Filtre statut si demandé (client)
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
-      // --- Détection "vrai nouvel incident" par IDs jamais vus ---
       const newIds = data.map((it) => it?._id).filter(Boolean);
       let hasNew = false;
       for (const id of newIds) {
@@ -318,7 +310,7 @@ const IncidentPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      const headers = buildHeaders(me);
+      const headers = buildHeaders(me, selectedCommuneId); // ⬅️
       const params = buildParams(me, selectedCommuneId);
       const res = await axios.delete(`${API_URL}/incidents/${id}`, {
         headers,
@@ -360,7 +352,7 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
+      const headers = { ...buildHeaders(me, selectedCommuneId), "Content-Type": "application/json" }; // ⬅️
       const params = buildParams(me, selectedCommuneId);
       const res = await axios.put(`${API_URL}/incidents/${editIncidentId}`, editedIncident, {
         headers,

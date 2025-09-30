@@ -157,8 +157,14 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status);
 
-      // ⚠️ Utilise l’endpoint détecté (ex: /api/articles ou /articles)
-      const res = await api.post(articlesPath, fd, { validateStatus: () => true, timeout: 30000 });
+      // ⬇️ Correction: augmente le timeout & enlève les limites de taille
+      const res = await api.post(articlesPath, fd, {
+        validateStatus: () => true,
+        timeout: 120000,                 // ← 120s pour laisser le temps à l’upload
+        maxContentLength: Infinity,      // ← utile si Axios limite la taille
+        maxBodyLength: Infinity,         // ← utile si Axios limite la taille
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
       if (res.status === 201 || (res.status >= 200 && res.status < 300)) {
         alert("Article créé ✅");
@@ -182,7 +188,10 @@ export default function ArticleCreate() {
         console.error(`POST ${articlesPath} error:`, res.status, msg, res.data);
       }
     } catch (err) {
-      const msg = err?.message || "Erreur réseau/CORS.";
+      const isTimeout = err?.code === "ECONNABORTED" || /timeout/i.test(err?.message || "");
+      const msg = isTimeout
+        ? "Le serveur a mis trop de temps à répondre pendant l’upload (réseau lent). Réessayez ou réduisez la taille de l’image."
+        : (err?.message || "Erreur réseau/CORS.");
       alert(`❌ ${msg}`);
       console.error("POST article exception:", err);
     } finally {

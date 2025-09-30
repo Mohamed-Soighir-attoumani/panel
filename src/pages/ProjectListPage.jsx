@@ -5,16 +5,46 @@ import "react-quill/dist/quill.snow.css";
 import api from "../api";               // baseURL = API_URL (qui finit par /api)
 import { API_URL, BASE_URL } from "../config";
 
+const ENDPOINT_CACHE_KEY = "securidem:projectsEndpoint";
+const CANDIDATES = ["/projects", "/projets", "/project"]; // ← variantes tolérées
+
 /** Construit une URL d'image fiable (si relative) */
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
-  // BACKEND sert /uploads à la racine (BASE_URL)
   return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
 
+/** Essaie de découvrir le bon endpoint et le met en cache */
+async function resolveProjectsEndpoint() {
+  const cached = localStorage.getItem(ENDPOINT_CACHE_KEY);
+  if (cached) return cached;
+
+  // on teste les candidats en GET simple
+  for (const path of CANDIDATES) {
+    try {
+      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
+      if (res.status === 200 && (Array.isArray(res.data) || res.data?.items || res.data?.projects)) {
+        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+      // 401/403 => chemin correct mais session; on le garde quand même
+      if (res.status === 401 || res.status === 403) {
+        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+    } catch (_) {
+      // essai suivant
+    }
+  }
+  // défaut
+  return "/projects";
+}
+
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
+  const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_CACHE_KEY) || "/projects");
+
   const [editingProject, setEditingProject] = useState(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -24,13 +54,16 @@ const ProjectListPage = () => {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    fetchProjects();
+    (async () => {
+      const ep = await resolveProjectsEndpoint();
+      setEndpoint(ep);
+      await fetchProjects(ep);
+    })();
   }, []);
 
-  const fetchProjects = async () => {
+  const fetchProjects = async (ep = endpoint) => {
     try {
-      // api a déjà baseURL=/api → pas besoin de /api ici
-      const res = await api.get(`/projects`);
+      const res = await api.get(ep);
       const data =
         (Array.isArray(res.data) && res.data) ||
         res.data?.projects ||
@@ -76,11 +109,11 @@ const ProjectListPage = () => {
 
     const formData = new FormData();
     formData.append("name", (name || "").trim());
-    formData.append("description", description || ""); // HTML de ReactQuill
+    formData.append("description", description || ""); // HTML ReactQuill
     if (image) formData.append("image", image);
 
     try {
-      await api.put(`/projects/${editingProject._id}`, formData);
+      await api.put(`${endpoint}/${editingProject._id}`, formData);
       setSuccessMsg("✅ Projet modifié avec succès.");
       resetForm();
       fetchProjects();
@@ -95,7 +128,7 @@ const ProjectListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer ce projet ?")) return;
     try {
-      await api.delete(`/projects/${id}`);
+      await api.delete(`${endpoint}/${id}`);
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
@@ -230,8 +263,10 @@ const ProjectListPage = () => {
         </ul>
       )}
 
-      {/* Debug utile, à masquer en prod si tu veux */}
-      <p className="text-xs text-gray-400 mt-6">API: {API_URL}</p>
+      {/* Debug utile */}
+      <p className="text-xs text-gray-400 mt-6">
+        API: {API_URL} • Endpoint projets: <code>{endpoint}</code>
+      </p>
     </div>
   );
 };

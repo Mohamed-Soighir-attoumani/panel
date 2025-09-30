@@ -24,13 +24,12 @@
     "react-scripts": "5.0.1",
     "react-toastify": "^11.0.5",
     "recharts": "^2.15.3",
-    "eslint-plugin-react-hooks": "^4.6.2",
     "jspdf": "^2.5.1",
-    "jspdf-autotable": "^3.8.2"
-  },
-  "devDependencies": {
+    "jspdf-autotable": "^3.8.2",
+    "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.2"
   },
+  "devDependencies": {},
   "browserslist": {
     "production": [
       ">0.2%",

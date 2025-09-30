@@ -1,13 +1,7 @@
-// src/pages/NotificationsCreate.jsx
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import VisibilityControls from "../components/VisibilityControls";
-import { API_URL } from "../config";
-
-function buildAuthHeaders() {
-  const token = localStorage.getItem("token") || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import api from "../api";
+import { NOTIFICATIONS_PATH } from "../config";
 
 export default function NotificationsCreate() {
   const [me, setMe] = useState(null);
@@ -29,18 +23,13 @@ export default function NotificationsCreate() {
 
   const [submitting, setSubmitting] = useState(false);
 
-  // Charger /me (⚠️ API_URL inclut déjà /api)
   useEffect(() => {
     (async () => {
       try {
-        const res = await axios.get(`${API_URL}/me`, {
-          headers: buildAuthHeaders(),
-          timeout: 15000,
-          validateStatus: () => true,
-        });
-
+        // IMPORTANT: passer par l’instance api et la route /api/me
+        const res = await api.get("/api/me", { validateStatus: () => true, timeout: 15000 });
         if (res.status === 200) {
-          const user = res?.data?.user || null;
+          const user = res?.data?.user || res?.data || null;
           setMe(user);
           if (user?.role === "admin") {
             setVisibility((v) => ({
@@ -54,10 +43,10 @@ export default function NotificationsCreate() {
           window.location.assign("/login");
           return;
         } else {
-          console.warn("GET /me non OK:", res.status, res.data);
+          console.warn("GET /api/me non OK:", res.status, res.data);
         }
       } catch (e) {
-        console.error("GET /me error:", e);
+        console.error("GET /api/me error:", e);
         localStorage.removeItem("token");
         window.location.assign("/login");
         return;
@@ -86,14 +75,10 @@ export default function NotificationsCreate() {
         endAt: visibility.endAt || null,
       };
 
-      // ⚠️ API_URL inclut déjà /api → pas de /api en plus
-      const res = await axios.post(`${API_URL}/notifications`, payload, {
-        headers: {
-          "Content-Type": "application/json",
-          ...buildAuthHeaders(),
-        },
-        timeout: 20000,
+      // IMPORTANT : utiliser l’instance api + le chemin constant
+      const res = await api.post(NOTIFICATIONS_PATH, payload, {
         validateStatus: () => true,
+        timeout: 20000,
       });
 
       if (res.status === 401 || res.status === 403) {
@@ -104,10 +89,7 @@ export default function NotificationsCreate() {
       }
 
       if (res.status < 200 || res.status >= 300) {
-        const msg =
-          res?.data?.message ||
-          res?.statusText ||
-          `Erreur lors de la création (HTTP ${res.status}).`;
+        const msg = res?.data?.message || res?.statusText || `Erreur (HTTP ${res.status}).`;
         throw new Error(msg);
       }
 

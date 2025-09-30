@@ -3,51 +3,37 @@ import axios from "axios";
 import { API_URL } from "./config";
 
 /**
- * Normalise la base pour garantir UNE SEULE fois le suffixe /api.
- * - "https://host"            -> "https://host/api"
- * - "https://host/"           -> "https://host/api"
- * - "https://host/api"        -> "https://host/api"
- * - "https://host/api/"       -> "https://host/api"
- * - "https://host/api/api"    -> "https://host/api"   (corrige doublon)
- * - ""/undefined -> window.location.origin + "/api"   (fallback)
+ * On force un baseURL qui finit TOUJOURS par /api/
+ * Quel que soit ton API_URL (avec ou sans /api), on retombe sur .../api/
  */
-function makeApiBase(raw) {
-  const baseRaw = (raw || "").trim().replace(/\/+$/, "");
-  const origin =
-    baseRaw ||
-    (typeof window !== "undefined" ? window.location.origin.replace(/\/+$/, "") : "");
-
-  if (!origin) return "/api"; // très rare (SSR sans env), mais safe
-
-  // supprime doublons finaux "/api(/api)*"
-  const cleaned = origin.replace(/(?:\/api)+$/i, "");
-  return `${cleaned}/api`;
-}
-
-const BASE = makeApiBase(API_URL);
+const raw = String(API_URL || "").replace(/\/+$/, "");
+const withApi = /\/api$/i.test(raw) ? raw : `${raw}/api`;
+const baseURL = `${withApi}/`; // <-- slash final IMPORTANT
 
 const api = axios.create({
-  baseURL: BASE,        // ex: https://mon-backend.tld/api
+  baseURL,
   timeout: 20000,
   validateStatus: () => true,
 });
 
-// 🔐 Token auto
+// 🔐 Bearer auto (prend 'token' puis fallback 'token_orig' si besoin)
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("token") || localStorage.getItem("token_orig");
   if (token) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
 
-  // Nettoie un éventuel "/api/..." au début du chemin pour éviter /api/api/...
+  // ✅ On veut toujours adresser RELATIVEMENT à baseURL (/api/)
+  //    Donc :
+  //    - on supprime le slash de tête s'il y en a un
+  //    - on supprime "api/" de tête si quelqu’un a encore mis "/api/..."
   if (typeof config.url === "string") {
-    // force un seul slash de tête
-    if (!config.url.startsWith("/")) config.url = `/${config.url}`;
-    // supprime un préfixe /api s'il existe
-    config.url = config.url.replace(/^\/api(\/|$)/i, "/");
+    let u = config.url.trim();
+    if (u.startsWith("/")) u = u.slice(1);
+    if (u.toLowerCase().startsWith("api/")) u = u.slice(4);
+    config.url = u; // ex: "me", "incidents?x=1", "articles/123"
   }
-
   return config;
 });
 

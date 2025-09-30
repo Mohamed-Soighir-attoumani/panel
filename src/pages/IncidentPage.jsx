@@ -1,9 +1,10 @@
+// src/pages/IncidentPage.jsx
 import L from "leaflet";
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config"; // ⚠️ contient déjà /api
+import { API_URL, INCIDENTS_PATH } from "../config";
 
 // ====== Cartes ======
 const IncidentMap = ({ latitude, longitude }) => (
@@ -48,22 +49,21 @@ const GlobalIncidentMap = ({ incidents }) => {
 };
 
 // === helper headers ===
-// ⬇️ ajoute systématiquement x-commune-id selon le rôle
-function buildHeaders(me, selectedCommuneId) {
+function buildHeaders(me) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
-  if (me?.role === "superadmin" && selectedCommuneId) headers["x-commune-id"] = selectedCommuneId;
   return headers;
 }
 
-// === helper params (on garde le support côté serveur si utilisé) ===
+// === helper params (communeId côté requêtes) ===
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
+  // Admin: force sa commune
   if (me?.role === "admin" && me?.communeId) {
     params.communeId = me.communeId;
   }
+  // Superadmin: applique le filtre si choisi
   if (me?.role === "superadmin" && selectedCommuneId) {
     params.communeId = selectedCommuneId;
   }
@@ -84,13 +84,11 @@ const IncidentPage = () => {
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
-  // 🔽 communes list pour le superadmin
   const [communes, setCommunes] = useState([]);
   const [selectedCommuneId, setSelectedCommuneId] = useState(
     (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || ""
   );
 
-  // --- Détection "vrai nouvel incident" ---
   const prevIdsRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
 
@@ -101,7 +99,7 @@ const IncidentPage = () => {
   const isAudioAllowedRef = useRef(false);
   const pendingPlayRef = useRef(false);
 
-  // charge /me pour connaître le rôle/commune
+  // charge /me (root) pour connaître le rôle/commune
   useEffect(() => {
     (async () => {
       try {
@@ -133,7 +131,7 @@ const IncidentPage = () => {
     })();
   }, []);
 
-  // superadmin : charger les communes depuis /api/communes (fallback: alias public)
+  // superadmin : charger les communes
   useEffect(() => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
@@ -141,7 +139,7 @@ const IncidentPage = () => {
           const headers = buildHeaders(me);
           let list = [];
           try {
-            const r = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
+            const r = await axios.get(`${API_URL}/api/communes`, { headers, timeout: 15000 });
             const arr = Array.isArray(r.data)
               ? r.data
               : Array.isArray(r.data?.items)
@@ -151,8 +149,7 @@ const IncidentPage = () => {
               : [];
             list = arr;
           } catch {
-            const baseNoApi = API_URL.replace(/\/api\/?$/, "");
-            const r2 = await axios.get(`${baseNoApi}/communes`, { headers, timeout: 15000 });
+            const r2 = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
             const arr2 = Array.isArray(r2.data)
               ? r2.data
               : Array.isArray(r2.data?.items)
@@ -252,12 +249,13 @@ const IncidentPage = () => {
   const fetchIncidents = useCallback(async () => {
     if (loadingMe) return;
     try {
-      const headers = buildHeaders(me, selectedCommuneId); // ⬅️ ajoute x-commune-id
+      const headers = buildHeaders(me);
       const params = buildParams(me, selectedCommuneId, {
         period: periodFilter || undefined,
       });
 
-      const response = await axios.get(`${API_URL}/incidents`, {
+      // IMPORTANT : route sous /api/incidents (INCIDENTS_PATH)
+      const response = await axios.get(`${API_URL}${INCIDENTS_PATH}`, {
         headers,
         params,
         timeout: 20000,
@@ -310,9 +308,9 @@ const IncidentPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      const headers = buildHeaders(me, selectedCommuneId); // ⬅️
+      const headers = buildHeaders(me);
       const params = buildParams(me, selectedCommuneId);
-      const res = await axios.delete(`${API_URL}/incidents/${id}`, {
+      const res = await axios.delete(`${API_URL}${INCIDENTS_PATH}/${id}`, {
         headers,
         params,
         timeout: 15000,
@@ -352,9 +350,9 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      const headers = { ...buildHeaders(me, selectedCommuneId), "Content-Type": "application/json" }; // ⬅️
+      const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
       const params = buildParams(me, selectedCommuneId);
-      const res = await axios.put(`${API_URL}/incidents/${editIncidentId}`, editedIncident, {
+      const res = await axios.put(`${API_URL}${INCIDENTS_PATH}/${editIncidentId}`, editedIncident, {
         headers,
         params,
         timeout: 20000,
@@ -378,7 +376,6 @@ const IncidentPage = () => {
     }
   };
 
-  // persist selection commune (superadmin)
   useEffect(() => {
     if (me?.role === "superadmin") {
       if (selectedCommuneId) {
@@ -422,7 +419,6 @@ const IncidentPage = () => {
           <option value="30">30 derniers jours</option>
         </select>
 
-        {/* Sélecteur visible uniquement pour superadmin */}
         {me?.role === "superadmin" && (
           <select
             className="input"

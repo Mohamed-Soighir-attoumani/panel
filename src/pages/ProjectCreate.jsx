@@ -1,13 +1,8 @@
 // src/pages/ProjectCreate.jsx
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import VisibilityControls from "../components/VisibilityControls";
-import { API_URL } from "../config";
-
-function buildAuthHeaders() {
-  const token = localStorage.getItem("token") || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import api from "../api";
+import { PROJECTS_PATH } from "../config";
 
 export default function ProjectCreate() {
   const [me, setMe] = useState(null);
@@ -32,18 +27,17 @@ export default function ProjectCreate() {
   useEffect(() => {
     (async () => {
       try {
-        // ⚠️ API_URL contient déjà /api
-        const res = await axios.get(`${API_URL}/me`, {
-          headers: buildAuthHeaders(),
-          timeout: 15000,
+        // IMPORTANT : passer par l’instance api et préfixer /api
+        const res = await api.get("/api/me", {
           validateStatus: () => true,
+          timeout: 15000,
         });
 
         if (res.status === 200) {
-          const user = res?.data?.user || null;
+          const user = res?.data?.user || res?.data || null;
           setMe(user);
           if (user?.role === "admin") {
-            setVisibility(v => ({
+            setVisibility((v) => ({
               ...v,
               communeId: user.communeId || "",
               visibility: "local",
@@ -54,10 +48,10 @@ export default function ProjectCreate() {
           window.location.assign("/login");
           return;
         } else {
-          console.warn("GET /me non OK:", res.status, res.data);
+          console.warn("GET /api/me non OK:", res.status, res.data);
         }
       } catch (e) {
-        console.error("GET /me error:", e);
+        console.error("GET /api/me error:", e);
         localStorage.removeItem("token");
         window.location.assign("/login");
         return;
@@ -84,21 +78,22 @@ export default function ProjectCreate() {
       // Visibilité
       fd.append("visibility", visibility.visibility);
       if (visibility.communeId) fd.append("communeId", visibility.communeId);
-      if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
-        visibility.audienceCommunes.forEach((c) => fd.append("audienceCommunes[]", c));
+      if (
+        Array.isArray(visibility.audienceCommunes) &&
+        visibility.audienceCommunes.length
+      ) {
+        visibility.audienceCommunes.forEach((c) =>
+          fd.append("audienceCommunes[]", c)
+        );
       }
       fd.append("priority", visibility.priority);
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
-      // ⚠️ API_URL contient déjà /api
-      const res = await axios.post(`${API_URL}/projects`, fd, {
-        headers: {
-          ...buildAuthHeaders(),
-          // Ne PAS fixer Content-Type: axios s'en charge pour FormData (boundary)
-        },
-        timeout: 20000,
+      // IMPORTANT : utiliser l’instance api + la constante de chemin
+      const res = await api.post(PROJECTS_PATH, fd, {
         validateStatus: () => true,
+        timeout: 30000,
       });
 
       if (res.status === 401 || res.status === 403) {
@@ -120,7 +115,9 @@ export default function ProjectCreate() {
       setForm({ name: "", description: "", imageFile: null });
     } catch (err) {
       console.error("Erreur création projet:", err);
-      alert(err?.message || err?.response?.data?.message || "Erreur lors de la création");
+      alert(
+        err?.message || err?.response?.data?.message || "Erreur lors de la création"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -155,11 +152,15 @@ export default function ProjectCreate() {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Image (optionnel)</label>
+            <label className="block text-sm text-gray-700 mb-1">
+              Image (optionnel)
+            </label>
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setForm({ ...form, imageFile: e.target.files?.[0] || null })}
+              onChange={(e) =>
+                setForm({ ...form, imageFile: e.target.files?.[0] || null })
+              }
             />
           </div>
         </div>
@@ -182,6 +183,11 @@ export default function ProjectCreate() {
             Réinitialiser
           </button>
         </div>
+
+        {/* Debug utile */}
+        <p className="text-xs text-gray-400 mt-4">
+          projectsPath: <code>{PROJECTS_PATH}</code>
+        </p>
       </form>
     </div>
   );

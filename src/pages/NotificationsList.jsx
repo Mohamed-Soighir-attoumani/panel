@@ -1,11 +1,9 @@
-// src/pages/NotificationsList.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import axios from "axios";
-import { API_URL } from "../config";
+import api from "../api";
+import { NOTIFICATIONS_PATH } from "../config";
 
 function buildHeaders() {
-  const token = localStorage.getItem("token") || "";
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = {};
   try {
     const me = JSON.parse(localStorage.getItem("me") || "null");
     if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
@@ -33,8 +31,7 @@ export default function NotificationsList() {
     } catch { setMe(null); }
   }, []);
 
-  const headers = useMemo(buildHeaders, [
-    localStorage.getItem("token"),
+  const extraHeaders = useMemo(buildHeaders, [
     localStorage.getItem("me"),
     localStorage.getItem("selectedCommuneId"),
   ]);
@@ -42,13 +39,22 @@ export default function NotificationsList() {
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API_URL}/api/notifications`, {
-        headers,
-        params: period ? { period } : {},
+      const params = period ? { period } : {};
+      // IMPORTANT : utiliser l’instance api + chemin constant
+      const res = await api.get(NOTIFICATIONS_PATH, {
+        headers: extraHeaders,
+        params,
+        validateStatus: () => true,
       });
-      setItems(Array.isArray(res.data) ? res.data : []);
+      if (res.status >= 200 && res.status < 300) {
+        setItems(Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.items) ? res.data.items : []));
+      } else {
+        console.warn("GET notifications non OK:", res.status, res.data);
+        setItems([]);
+      }
     } catch (e) {
-      console.error("Erreur /api/notifications:", e);
+      console.error("Erreur GET notifications:", e);
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -56,7 +62,7 @@ export default function NotificationsList() {
 
   useEffect(() => {
     fetchAll();
-  }, [period, headers]);
+  }, [period, extraHeaders]);
 
   const canEditOrDelete = (notif) => {
     if (!me) return false;
@@ -77,24 +83,38 @@ export default function NotificationsList() {
 
   const saveEdit = async () => {
     try {
-      await axios.patch(`${API_URL}/api/notifications/${editId}`, editForm, { headers });
-      cancelEdit();
-      fetchAll();
+      const res = await api.patch(`${NOTIFICATIONS_PATH}/${editId}`, editForm, {
+        headers: extraHeaders,
+        validateStatus: () => true,
+      });
+      if (res.status >= 200 && res.status < 300) {
+        cancelEdit();
+        fetchAll();
+      } else {
+        throw new Error(res?.data?.message || `HTTP ${res.status}`);
+      }
     } catch (e) {
       console.error("Erreur PATCH notification:", e);
-      alert(e?.response?.data?.message || "Erreur lors de l’enregistrement");
+      alert(e?.message || "Erreur lors de l’enregistrement");
     }
   };
 
   const remove = async (id) => {
     if (!window.confirm("Supprimer cette notification ?")) return;
     try {
-      await axios.delete(`${API_URL}/api/notifications/${id}`, { headers });
-      if (editId === id) cancelEdit();
-      fetchAll();
+      const res = await api.delete(`${NOTIFICATIONS_PATH}/${id}`, {
+        headers: extraHeaders,
+        validateStatus: () => true,
+      });
+      if (res.status >= 200 && res.status < 300) {
+        if (editId === id) cancelEdit();
+        fetchAll();
+      } else {
+        throw new Error(res?.data?.message || `HTTP ${res.status}`);
+      }
     } catch (e) {
       console.error("Erreur DELETE notification:", e);
-      alert(e?.response?.data?.message || "Erreur lors de la suppression");
+      alert(e?.message || "Erreur lors de la suppression");
     }
   };
 
@@ -218,7 +238,7 @@ export default function NotificationsList() {
                             ? "bg-red-600 text-white hover:bg-red-700"
                             : "bg-gray-300 text-gray-600 cursor-not-allowed"
                         }`}
-                        title={editable ? "Supprimer" : "Suppression non autorisée"}
+                        title={editable ? "Suppression" : "Suppression non autorisée"}
                       >
                         🗑️ Supprimer
                       </button>

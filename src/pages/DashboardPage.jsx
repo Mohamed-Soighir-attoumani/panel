@@ -71,7 +71,7 @@ const DashboardPage = () => {
         } else {
           // ne pas déconnecter sur 404/500
           setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
-          // essaye d'utiliser un "me" local pour afficher quand même le tableau de bord
+          // essai d'utiliser un "me" local pour afficher quand même le tableau de bord
           const cached = localStorage.getItem("me");
           if (cached) setMe(JSON.parse(cached));
         }
@@ -151,20 +151,42 @@ const DashboardPage = () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
-      const res = await api.get(`/api/devices/count`, {
+
+      // on tente d'abord l'endpoint moderne /count (admin)
+      const res = await api.get(`/api/devices/count?activeDays=30`, {
         headers,
         validateStatus: () => true,
       });
+
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
-        setBannerError("");
-      } else if (!handleAuthError({ response: { status: res.status } })) {
-        setBannerError(`Erreur chargement utilisateurs (HTTP ${res.status}).`);
+        setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+        return;
+      }
+
+      // --- Fallback sur anciennes versions : /api/devices (lecture du total)
+      if (res.status === 404) {
+        const fallback = await api.get(`/api/devices?page=1&pageSize=1`, {
+          headers,
+          validateStatus: () => true,
+        });
+        if (fallback.status === 200 && typeof fallback.data?.total === "number") {
+          setDeviceCount(fallback.data.total);
+          // pas d'alerte si on a un fallback OK
+          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+          return;
+        }
+      }
+
+      // autres erreurs : on n’éjecte pas l’utilisateur, on journalise
+      if (!handleAuthError({ response: { status: res.status } })) {
+        console.warn("devices/count non disponible, code:", res.status);
+        // On ne met pas de bannière agressive pour ce KPI uniquement
       }
     } catch (err) {
       if (!handleAuthError(err)) {
         console.error("Erreur fetchDeviceCount:", err);
-        setBannerError("Erreur chargement du nombre d'utilisateurs.");
+        // pas de bannière bloquante pour ce KPI
       }
     }
   }, [handleAuthError, loadingMe, me]);
@@ -273,7 +295,7 @@ const DashboardPage = () => {
 
   if (loadingMe) {
     return <div className="p-6">Chargement…</div>;
-  }
+    }
 
   return (
     <div className="p-4 sm:p-6">
@@ -310,6 +332,7 @@ const DashboardPage = () => {
                 const v = e.target.value.trim();
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
+                // rechargements ciblés
                 fetchData();
                 fetchDeviceCount();
               }}
@@ -317,7 +340,7 @@ const DashboardPage = () => {
           )}
 
           <button
-            onClick={fetchData}
+            onClick={() => { fetchData(); fetchDeviceCount(); }}
             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
           >
             🔄 Rafraîchir

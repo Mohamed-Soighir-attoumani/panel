@@ -3,7 +3,11 @@ import React, { useState, useEffect, useRef } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import api from "../api";               // baseURL = API_URL (finit par /api)
-import { API_URL, BASE_URL, PROJECTS_PATH } from "../config";
+import * as cfg from "../config";       // <-- lecture optionnelle de PROJECTS_PATH
+
+const API_URL = cfg.API_URL;
+const BASE_URL = cfg.BASE_URL;
+const PROJECTS_PATH_FROM_CONFIG = cfg.PROJECTS_PATH; // peut être undefined
 
 // On mémorise l’endpoint validé pour éviter de retester à chaque fois
 const ENDPOINT_CACHE_KEY = "securidem:projectsEndpoint";
@@ -52,7 +56,10 @@ async function resolveProjectsEndpoint(candidates, triedRef) {
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
-  const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_CACHE_KEY) || (PROJECTS_PATH || "/projects"));
+  // si PROJECTS_PATH est défini dans config, on l’utilise comme valeur initiale
+  const [endpoint, setEndpoint] = useState(
+    localStorage.getItem(ENDPOINT_CACHE_KEY) || (PROJECTS_PATH_FROM_CONFIG || "/projects")
+  );
 
   const [editingProject, setEditingProject] = useState(null);
   const [name, setName] = useState("");
@@ -69,8 +76,12 @@ const ProjectListPage = () => {
     (async () => {
       // on construit la liste de candidats : PROJECTS_PATH (si fourni) + défauts
       const candidatesBase = [];
-      if (PROJECTS_PATH && typeof PROJECTS_PATH === "string") {
-        candidatesBase.push(PROJECTS_PATH.startsWith("/") ? PROJECTS_PATH : `/${PROJECTS_PATH}`);
+      if (PROJECTS_PATH_FROM_CONFIG && typeof PROJECTS_PATH_FROM_CONFIG === "string") {
+        candidatesBase.push(
+          PROJECTS_PATH_FROM_CONFIG.startsWith("/")
+            ? PROJECTS_PATH_FROM_CONFIG
+            : `/${PROJECTS_PATH_FROM_CONFIG}`
+        );
       }
       const candidates = [...new Set([...candidatesBase, ...DEFAULT_CANDIDATES])];
 

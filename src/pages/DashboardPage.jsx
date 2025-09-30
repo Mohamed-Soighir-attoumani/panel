@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
@@ -11,38 +11,43 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-// Normalise une chaîne en clé canonique
-const canonicalizeLabel = (raw) => {
+// Normalise les libellés de type
+function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
   const s = String(raw).trim();
   const key = s.toLowerCase();
   const label = s.charAt(0).toUpperCase() + s.slice(1);
   return { key, label };
-};
-
-const normCid = (id) => String(id || "").trim().toLowerCase();
-
-// Commune à utiliser pour les requêtes
-function getSelectedCommuneId(me) {
-  if (!me) return "";
-  if (me.role === "admin") return normCid(me.communeId);
-  if (me.role === "superadmin") {
-    const v = (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
-    return normCid(v);
-  }
-  return "";
 }
 
 function buildHeaders(me) {
   const headers = {};
-  const cid = getSelectedCommuneId(me);
-  if (cid) headers["x-commune-id"] = cid;
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = me.communeId;
+  }
+  if (me?.role === "superadmin") {
+    const selectedCid =
+      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    if (selectedCid) headers["x-commune-id"] = selectedCid;
+  }
   return headers;
 }
 
+// 🔥 Lecture instantanée du cache utilisateur
+function readCachedMe() {
+  try {
+    const raw = localStorage.getItem("me");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 const DashboardPage = () => {
-  const [me, setMe] = useState(null);
-  const [loadingMe, setLoadingMe] = useState(true);
+  // 👉 me est immédiatement rempli si présent en cache (donc rendu instantané)
+  const cached = readCachedMe();
+  const [me, setMe] = useState(cached);
+  const [loadingMe, setLoadingMe] = useState(!cached);
 
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -52,125 +57,111 @@ const DashboardPage = () => {
 
   const [bannerError, setBannerError] = useState("");
 
-  // Pour éviter les setState après un unmount
-  const mountedRef = useRef(true);
+  // Revalidation silencieuse de /me en arrière-plan
   useEffect(() => {
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  // charge /me depuis l'API (tolérant /api doublé)
-  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        let res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
-        if (res.status === 404) {
-          try {
-            res = await api.get("/me", { timeout: 15000, validateStatus: () => true });
-          } catch (_) {}
-        }
+        const res = await api.get("me", { timeout: 15000, validateStatus: () => true });
+        if (cancelled) return;
+
         if (res.status === 200) {
           const user = res?.data?.user || res?.data || null;
-          if (!user) throw new Error("Réponse /me inattendue");
-          if (!mountedRef.current) return;
-          setMe(user);
-          localStorage.setItem("me", JSON.stringify(user));
-          setBannerError("");
+          if (user) {
+            setMe(user);
+            localStorage.setItem("me", JSON.stringify(user));
+            setBannerError("");
+          } else {
+            throw new Error("Réponse /me inattendue");
+          }
         } else if (res.status === 401 || res.status === 403) {
           localStorage.removeItem("token");
           localStorage.removeItem("token_orig");
+          localStorage.removeItem("me");
           window.location.href = "/login";
           return;
         } else {
-          const cached = localStorage.getItem("me");
-          if (cached) setMe(JSON.parse(cached));
+          // on garde me du cache si dispo, on signale juste l’erreur
           setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
         }
       } catch (e) {
-        const cached = localStorage.getItem("me");
-        if (cached) setMe(JSON.parse(cached));
-        setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+        // pas de redirection si on a déjà me en cache
+        if (!cached) {
+          setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+        }
       } finally {
-        if (mountedRef.current) setLoadingMe(false);
+        if (!cancelled) setLoadingMe(false);
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // une seule fois au montage
 
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
     if (status === 401 || status === 403) {
       localStorage.removeItem("token");
       localStorage.removeItem("token_orig");
+      localStorage.removeItem("me");
       window.location.href = "/login";
       return true;
     }
     return false;
   }, []);
 
-  // --- Récupération incidents + notifications (stable)
   const fetchData = useCallback(async () => {
-    if (loadingMe) return;
-
+    if (!me) return; // on a besoin de me (cache ou réseau)
     const headers = buildHeaders(me);
-    const cid = getSelectedCommuneId(me);
-    const qsPeriod = period === "all" ? "" : `period=${period}`;
-    const qsCid = cid ? `communeId=${encodeURIComponent(cid)}` : "";
-    const query = [qsPeriod, qsCid].filter(Boolean).join("&");
-    const suffix = query ? `?${query}` : "";
+    const qs = period === "all" ? "" : `?period=${period}`;
 
     let incOk = false;
     let notifOk = false;
 
-    // On récupère TOUT en parallèle
     try {
-      const [incidentRes, notifRes] = await Promise.all([
-        api.get(`/api/incidents${suffix}`, { headers, validateStatus: () => true }),
-        api.get(`/api/notifications${cid ? `?communeId=${encodeURIComponent(cid)}` : ""}`, {
-          headers,
-          validateStatus: () => true,
-        }),
-      ]);
-
-      // --- Incidents
+      const incidentRes = await api.get(`incidents${qs}`, {
+        headers,
+        validateStatus: () => true,
+      });
       if (incidentRes.status === 200) {
         const d = incidentRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        if (mountedRef.current) setIncidents(arr);
+        setIncidents(arr);
         incOk = true;
       } else if (incidentRes.status === 404) {
-        // fail-soft si endpoint absent
-        if (mountedRef.current) setIncidents([]);
+        setIncidents([]);
         incOk = true;
       } else if (!handleAuthError({ response: { status: incidentRes.status } })) {
-        console.warn("[dashboard] incidents HTTP", incidentRes.status, incidentRes.data);
-        if (mountedRef.current) setIncidents([]);
+        setIncidents([]);
       }
+    } catch (err) {
+      if (!handleAuthError(err)) setIncidents([]);
+    }
 
-      // --- Notifications
+    try {
+      const notifRes = await api.get(`notifications`, {
+        headers,
+        validateStatus: () => true,
+      });
       if (notifRes.status === 200) {
         const d = notifRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        if (mountedRef.current) setNotifications(arr);
+        setNotifications(arr);
         notifOk = true;
       } else if (notifRes.status === 404) {
-        if (mountedRef.current) setNotifications([]);
+        setNotifications([]);
         notifOk = true;
       } else if (!handleAuthError({ response: { status: notifRes.status } })) {
-        console.warn("[dashboard] notifications HTTP", notifRes.status, notifRes.data);
-        if (mountedRef.current) setNotifications([]);
+        setNotifications([]);
       }
+    } catch (err) {
+      if (!handleAuthError(err)) setNotifications([]);
+    }
 
-      // Construire l'activité directement à partir des réponses (pas du state)
-      const incForActivity =
-        incidentRes?.status === 200
-          ? (Array.isArray(incidentRes.data) ? incidentRes.data : incidentRes.data?.items) || []
-          : [];
-      const notifForActivity =
-        notifRes?.status === 200
-          ? (Array.isArray(notifRes.data) ? notifRes.data : notifRes.data?.items) || []
-          : [];
-
+    try {
       const nextActivity = [
-        ...incForActivity.slice(0, 3).map((inc) => {
+        ...(incOk ? incidents : []).slice(0, 3).map((inc) => {
           const t = inc?.type || inc?.title || "Inconnu";
           return {
             type: "incident",
@@ -178,96 +169,78 @@ const DashboardPage = () => {
             time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
           };
         }),
-        ...notifForActivity.slice(0, 3).map((notif) => ({
+        ...(notifOk ? notifications : []).slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
           time: notif?.createdAt ? new Date(notif.createdAt).toLocaleString("fr-FR") : "Date inconnue",
         })),
       ];
-      if (mountedRef.current) setActivity(nextActivity);
-    } catch (err) {
-      if (!handleAuthError(err)) {
-        console.error("Erreur fetchData:", err);
-        if (mountedRef.current) {
-          setIncidents([]);
-          setNotifications([]);
-          setActivity([]);
-        }
-      }
+      setActivity(nextActivity);
+    } catch {
+      setActivity([]);
     }
 
-    // Bannière: afficher seulement si les 2 ont VRAIMENT échoué
-    if (mountedRef.current) {
-      if (!incOk && !notifOk) {
-        setBannerError("Erreur lors du chargement des données.");
-      } else {
-        setBannerError((prev) => (prev && prev.includes("chargement des données") ? "" : prev));
-      }
+    if (!incOk && !notifOk) {
+      setBannerError("Erreur lors du chargement des données.");
+    } else {
+      setBannerError((prev) =>
+        prev && prev.includes("chargement des données") ? "" : prev
+      );
     }
-  }, [handleAuthError, loadingMe, me, period]);
+  }, [handleAuthError, me, period, incidents, notifications]);
 
-  // --- Compteur d'utilisateurs (robuste pour admin ET superadmin)
   const fetchDeviceCount = useCallback(async () => {
-    if (loadingMe) return;
-    const headers = buildHeaders(me);
-    const cid = getSelectedCommuneId(me);
-
-    // 1) Essai endpoint moderne count (avec header ET query pour maximiser la compatibilité)
+    if (!me) return;
     try {
-      const url = `/api/devices/count?activeDays=30${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
-      const res = await api.get(url, { headers, validateStatus: () => true });
+      const headers = buildHeaders(me);
+
+      const res = await api.get(`devices/count?activeDays=30`, {
+        headers,
+        validateStatus: () => true,
+      });
 
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
-        if (mountedRef.current) setDeviceCount(res.data.count);
-        if (mountedRef.current) {
-          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
-        }
+        setDeviceCount(res.data.count);
+        setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
         return;
       }
 
-      // 2) Fallback si 404 ou 501/403 → pagination minimale pour lire "total"
-      if ([404, 501, 403].includes(res.status)) {
-        const url2 = `/api/devices?page=1&pageSize=1${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
-        const fallback = await api.get(url2, { headers, validateStatus: () => true });
+      if (res.status === 404) {
+        const fallback = await api.get(`devices?page=1&pageSize=1`, {
+          headers,
+          validateStatus: () => true,
+        });
         if (fallback.status === 200 && typeof fallback.data?.total === "number") {
-          if (mountedRef.current) setDeviceCount(fallback.data.total);
-          if (mountedRef.current) {
-            setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
-          }
-          return;
-        }
-
-        // 3) Fallback absolu: si l’API renvoie une liste directe
-        if (fallback.status === 200 && Array.isArray(fallback.data)) {
-          if (mountedRef.current) setDeviceCount(fallback.data.length);
+          setDeviceCount(fallback.data.total);
+          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
           return;
         }
       }
 
       if (!handleAuthError({ response: { status: res.status } })) {
-        console.warn("devices/count indisponible, code:", res.status);
+        // silencieux
       }
     } catch (err) {
       if (!handleAuthError(err)) {
-        console.error("Erreur fetchDeviceCount (count):", err);
+        // silencieux
       }
     }
-  }, [handleAuthError, loadingMe, me]);
+  }, [handleAuthError, me]);
 
-  // Lancer les fetchs + rafraîchissement périodique
+  // ⚡ Si on a me en cache, on peut lancer tout de suite les fetchs (pas d’attente)
   useEffect(() => {
-    fetchData();
-    fetchDeviceCount();
-
-    const interval = setInterval(() => {
+    if (!loadingMe && me) {
       fetchData();
       fetchDeviceCount();
-    }, 30000);
+      const interval = setInterval(() => {
+        fetchData();
+        fetchDeviceCount();
+      }, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [loadingMe, me, fetchData, fetchDeviceCount]);
 
-    return () => clearInterval(interval);
-  }, [fetchData, fetchDeviceCount]);
-
-  // ==== Répartition par types (à partir du state incidents)
+  // ==== Répartition par types
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
     for (const inc of incidents) {
@@ -359,12 +332,11 @@ const DashboardPage = () => {
     </li>
   );
 
-  if (loadingMe) {
+  // 💡 On n’affiche plus d’écran “Chargement…” si on a un cache.
+  //    Au pire (premier chargement sans cache), on garde l’ancien fallback.
+  if (loadingMe && !me) {
     return <div className="p-6">Chargement…</div>;
   }
-
-  const isSuperadmin = me?.role === "superadmin";
-  const selectedCid = getSelectedCommuneId(me);
 
   return (
     <div className="p-4 sm:p-6">
@@ -392,16 +364,15 @@ const DashboardPage = () => {
           </select>
 
           {/* Sélecteur commune pour superadmin */}
-          {isSuperadmin && (
+          {me?.role === "superadmin" && (
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
               className="border px-2 py-1 rounded w-full sm:w-64"
-              defaultValue={selectedCid}
+              defaultValue={localStorage.getItem("selectedCommuneId") || ""}
               onBlur={(e) => {
-                const v = normCid(e.target.value);
+                const v = e.target.value.trim();
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
-                // rechargements ciblés
                 fetchData();
                 fetchDeviceCount();
               }}

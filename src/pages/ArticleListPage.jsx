@@ -1,12 +1,7 @@
 // src/pages/ArticleListPage.jsx
 import React, { useState, useEffect } from "react";
-import api from "../api";              // baseURL = API_URL (finit par /api)
-import { BASE_URL } from "../config";  // pour /uploads à la racine
-
-// --- Auto-résolution d'endpoint (cache localStorage) ---
-const ENDPOINT_CACHE_KEY = "securidem:articlesEndpoint";
-// ajoute d'autres variantes si besoin
-const CANDIDATES = ["/articles", "/news", "/article", "/actualites"];
+import api from "../api";
+import { BASE_URL, ARTICLES_PATH } from "../config";
 
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
@@ -14,37 +9,10 @@ const toFullUrl = (p) => {
   // Le backend sert /uploads à la racine (pas sous /api)
   return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
+
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
-// Essaie les endpoints candidats et met celui qui répond en cache
-async function resolveArticlesEndpoint() {
-  const cached = localStorage.getItem(ENDPOINT_CACHE_KEY);
-  if (cached) return cached;
-
-  for (const path of CANDIDATES) {
-    try {
-      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
-      // 200 avec tableau (ou items) => bon endpoint
-      if (res.status === 200 && (Array.isArray(res.data) || res?.data?.items)) {
-        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-      // 401/403 => souvent bon chemin mais session invalide
-      if (res.status === 401 || res.status === 403) {
-        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
-        return path;
-      }
-    } catch {
-      // on tente le suivant
-    }
-  }
-  // défaut
-  return "/articles";
-}
-
 const ArticleListPage = () => {
-  const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_CACHE_KEY) || "/articles");
-
   const [articles, setArticles] = useState([]);
   const [editingArticle, setEditingArticle] = useState(null);
 
@@ -53,29 +21,24 @@ const ArticleListPage = () => {
   const [image, setImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  // Métadonnées Play (édition)
+  // Métadonnées
   const [authorName, setAuthorName] = useState("");
   const [publisher, setPublisher] = useState("Association Bellevue Dembeni");
   const [sourceUrl, setSourceUrl] = useState("");
   const [status, setStatus] = useState("published"); // draft|published
 
-  // Visuels
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    (async () => {
-      const ep = await resolveArticlesEndpoint();
-      setEndpoint(ep);
-      fetchArticles(ep);
-    })();
+    fetchArticles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchArticles = async (ep = endpoint) => {
+  const fetchArticles = async () => {
     try {
-      // api a déjà baseURL=/api → on appelle juste l'endpoint
-      const res = await api.get(ep);
+      // IMPORTANT : les routes sont bien sous /api
+      const res = await api.get(ARTICLES_PATH);
       const data = Array.isArray(res.data) ? res.data : res.data?.items || [];
       setArticles(data);
       setErrorMsg("");
@@ -93,10 +56,12 @@ const ArticleListPage = () => {
     setContent(article.content || "");
     setImage(null);
     setImagePreview(article.imageUrl ? toFullUrl(article.imageUrl) : null);
+
     setAuthorName(article.authorName || "");
     setPublisher(article.publisher || "Association Bellevue Dembeni");
     setSourceUrl(article.sourceUrl || "");
     setStatus(article.status || "published");
+
     setSuccessMsg("");
     setErrorMsg("");
   };
@@ -126,14 +91,13 @@ const ArticleListPage = () => {
     formData.append("content", (content || "").trim());
     if (image) formData.append("image", image);
 
-    // métadonnées Play
     formData.append("authorName", (authorName || "").trim());
     formData.append("publisher", (publisher || "Association Bellevue Dembeni").trim());
     formData.append("status", status === "draft" ? "draft" : "published");
     if (sourceUrl) formData.append("sourceUrl", sourceUrl.trim());
 
     try {
-      await api.put(`${endpoint}/${editingArticle._id}`, formData);
+      await api.put(`${ARTICLES_PATH}/${editingArticle._id}`, formData);
       setSuccessMsg("✅ Article modifié avec succès.");
       resetForm();
       fetchArticles();
@@ -149,7 +113,7 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await api.delete(`${endpoint}/${id}`);
+      await api.delete(`${ARTICLES_PATH}/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {

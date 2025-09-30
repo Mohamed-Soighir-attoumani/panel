@@ -1,49 +1,58 @@
 // src/pages/ProjectListPage.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
-import api from "../api";               // baseURL = API_URL (qui finit par /api)
-import { API_URL, BASE_URL } from "../config";
+import api from "../api";               // baseURL = API_URL (finit par /api)
+import { API_URL, BASE_URL, PROJECTS_PATH } from "../config";
 
+// On mémorise l’endpoint validé pour éviter de retester à chaque fois
 const ENDPOINT_CACHE_KEY = "securidem:projectsEndpoint";
-const CANDIDATES = ["/projects", "/projets", "/project"]; // ← variantes tolérées
+
+// Candidats courants (tu peux en ajouter si besoin)
+const DEFAULT_CANDIDATES = ["/projects", "/projets", "/project", "/items/projects", "/contents/projects"];
 
 /** Construit une URL d'image fiable (si relative) */
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
+  // Le backend sert /uploads à la racine (BASE_URL)
   return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
 
-/** Essaie de découvrir le bon endpoint et le met en cache */
-async function resolveProjectsEndpoint() {
+/** Essaye de découvrir l’endpoint en GET simple (avec tolérance au format de payload) */
+async function resolveProjectsEndpoint(candidates, triedRef) {
   const cached = localStorage.getItem(ENDPOINT_CACHE_KEY);
   if (cached) return cached;
 
-  // on teste les candidats en GET simple
-  for (const path of CANDIDATES) {
+  for (const path of candidates) {
+    triedRef.current.push(path);
     try {
+      // NB: api a déjà /api → on passe un chemin RELATIF : "/projects"
       const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
-      if (res.status === 200 && (Array.isArray(res.data) || res.data?.items || res.data?.projects)) {
+      // 200 avec format attendu → validé
+      if (
+        res.status === 200 &&
+        (Array.isArray(res.data) || Array.isArray(res.data?.items) || Array.isArray(res.data?.projects))
+      ) {
         localStorage.setItem(ENDPOINT_CACHE_KEY, path);
         return path;
       }
-      // 401/403 => chemin correct mais session; on le garde quand même
+      // 401/403 → on considère l’endpoint bon (seulement authent non valide)
       if (res.status === 401 || res.status === 403) {
         localStorage.setItem(ENDPOINT_CACHE_KEY, path);
         return path;
       }
-    } catch (_) {
-      // essai suivant
+    } catch {
+      // on passe au suivant
     }
   }
-  // défaut
+  // défaut si rien n’a répondu
   return "/projects";
 }
 
 const ProjectListPage = () => {
   const [projects, setProjects] = useState([]);
-  const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_CACHE_KEY) || "/projects");
+  const [endpoint, setEndpoint] = useState(localStorage.getItem(ENDPOINT_CACHE_KEY) || (PROJECTS_PATH || "/projects"));
 
   const [editingProject, setEditingProject] = useState(null);
   const [name, setName] = useState("");
@@ -53,32 +62,50 @@ const ProjectListPage = () => {
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
+  // pour afficher ce qu’on a testé si 404
+  const triedPathsRef = useRef([]);
+
   useEffect(() => {
     (async () => {
-      const ep = await resolveProjectsEndpoint();
+      // on construit la liste de candidats : PROJECTS_PATH (si fourni) + défauts
+      const candidatesBase = [];
+      if (PROJECTS_PATH && typeof PROJECTS_PATH === "string") {
+        candidatesBase.push(PROJECTS_PATH.startsWith("/") ? PROJECTS_PATH : `/${PROJECTS_PATH}`);
+      }
+      const candidates = [...new Set([...candidatesBase, ...DEFAULT_CANDIDATES])];
+
+      const ep = await resolveProjectsEndpoint(candidates, triedPathsRef);
       setEndpoint(ep);
       await fetchProjects(ep);
     })();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // on résout et charge une seule fois au montage
+
+  const normalizeList = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.projects)) return payload.projects;
+    return [];
+  };
 
   const fetchProjects = async (ep = endpoint) => {
     try {
-      const res = await api.get(ep);
-      const data =
-        (Array.isArray(res.data) && res.data) ||
-        res.data?.projects ||
-        res.data?.items ||
-        [];
+      const res = await api.get(ep, { validateStatus: () => true });
+      if (res.status === 404) {
+        // On remonte un message plus explicite
+        const tried = triedPathsRef.current.length ? ` | chemins testés: ${triedPathsRef.current.join(", ")}` : "";
+        throw new Error(`Endpoint introuvable (${ep})${tried}`);
+      }
+      if (res.status >= 400) {
+        throw new Error(res?.data?.message || `HTTP ${res.status}`);
+      }
+      const data = normalizeList(res.data);
       setProjects(Array.isArray(data) ? data : []);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement projets :", err);
-      const status = err?.response?.status;
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Impossible de charger les projets";
-      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
+      setProjects([]); // on évite les vieux états
+      setErrorMsg(`❌ Impossible de charger les projets : ${err?.message || "erreur réseau"}`);
     }
   };
 
@@ -113,29 +140,34 @@ const ProjectListPage = () => {
     if (image) formData.append("image", image);
 
     try {
-      await api.put(`${endpoint}/${editingProject._id}`, formData);
+      const res = await api.put(`${endpoint}/${editingProject._id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        validateStatus: () => true,
+      });
+      if (res.status >= 400) {
+        throw new Error(res?.data?.message || `HTTP ${res.status}`);
+      }
       setSuccessMsg("✅ Projet modifié avec succès.");
       resetForm();
       fetchProjects();
     } catch (err) {
-      console.error("Erreur mise à jour projet :", err?.response?.status, err?.response?.data);
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message || err?.message || "Erreur lors de la mise à jour";
-      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
+      console.error("Erreur mise à jour projet :", err);
+      setErrorMsg(`❌ ${err?.message || "Erreur lors de la mise à jour"}`);
     }
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer ce projet ?")) return;
     try {
-      await api.delete(`${endpoint}/${id}`);
+      const res = await api.delete(`${endpoint}/${id}`, { validateStatus: () => true });
+      if (res.status >= 400) {
+        throw new Error(res?.data?.message || `HTTP ${res.status}`);
+      }
       setSuccessMsg("✅ Projet supprimé.");
       fetchProjects();
     } catch (err) {
-      console.error("Erreur suppression projet :", err?.response?.status, err?.response?.data);
-      const status = err?.response?.status;
-      const msg = err?.response?.data?.message || err?.message || "Erreur lors de la suppression";
-      setErrorMsg(`❌ ${msg} (${status || "réseau"})`);
+      console.error("Erreur suppression projet :", err);
+      setErrorMsg(`❌ ${err?.message || "Erreur lors de la suppression"}`);
     }
   };
 
@@ -266,6 +298,9 @@ const ProjectListPage = () => {
       {/* Debug utile */}
       <p className="text-xs text-gray-400 mt-6">
         API: {API_URL} • Endpoint projets: <code>{endpoint}</code>
+        {triedPathsRef.current.length > 0 && (
+          <> • Chemins testés: <code>{triedPathsRef.current.join(", ")}</code></>
+        )}
       </p>
     </div>
   );

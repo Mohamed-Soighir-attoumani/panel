@@ -2,17 +2,15 @@
 import React, { useState, useEffect } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
-// ⬇️ Instance axios avec baseURL + token interceptor (doit pointer vers .../api)
-import api from "../api";
-import { API_URL } from "../config";
+import api from "../api";               // baseURL = API_URL (qui finit par /api)
+import { API_URL, BASE_URL } from "../config";
 
 /** Construit une URL d'image fiable (si relative) */
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
-  // API_URL contient déjà /api → on retire le /api pour servir les fichiers statiques
-  const base = API_URL.replace(/\/api\/?$/, "");
-  return `${base}${p.startsWith("/") ? "" : "/"}${p}`;
+  // BACKEND sert /uploads à la racine (BASE_URL)
+  return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
 
 const ProjectListPage = () => {
@@ -31,11 +29,14 @@ const ProjectListPage = () => {
 
   const fetchProjects = async () => {
     try {
-      // ⚠️ baseURL de `api` doit déjà inclure /api
+      // api a déjà baseURL=/api → pas besoin de /api ici
       const res = await api.get(`/projects`);
-      // backend renvoie probablement un tableau simple
-      const data = Array.isArray(res.data) ? res.data : (res.data?.items || []);
-      setProjects(data);
+      const data =
+        (Array.isArray(res.data) && res.data) ||
+        res.data?.projects ||
+        res.data?.items ||
+        [];
+      setProjects(Array.isArray(data) ? data : []);
       setErrorMsg("");
     } catch (err) {
       console.error("Erreur chargement projets :", err);
@@ -75,14 +76,11 @@ const ProjectListPage = () => {
 
     const formData = new FormData();
     formData.append("name", (name || "").trim());
-    // ReactQuill retourne du HTML — on l’envoie tel quel
-    formData.append("description", description || "");
+    formData.append("description", description || ""); // HTML de ReactQuill
     if (image) formData.append("image", image);
 
     try {
-      await api.put(`/projects/${editingProject._id}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      await api.put(`/projects/${editingProject._id}`, formData);
       setSuccessMsg("✅ Projet modifié avec succès.");
       resetForm();
       fetchProjects();
@@ -194,41 +192,45 @@ const ProjectListPage = () => {
       )}
 
       <h2 className="text-xl font-semibold mb-4">📋 Liste des projets</h2>
-      <ul className="space-y-4">
-        {projects.map((project) => (
-          <li key={project._id} className="p-4 bg-gray-100 rounded shadow-sm">
-            <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
+      {projects.length === 0 ? (
+        <p className="text-gray-500">Aucun projet pour le moment.</p>
+      ) : (
+        <ul className="space-y-4">
+          {projects.map((project) => (
+            <li key={project._id} className="p-4 bg-gray-100 rounded shadow-sm">
+              <h3 className="text-lg font-bold text-gray-800 mb-2">{project.name}</h3>
 
-            <img
-              src={toFullUrl(project.imageUrl)}
-              alt={`Image du projet ${project.name}`}
-              className="h-40 w-full object-cover rounded border mb-3"
-              loading="lazy"
-            />
+              <img
+                src={toFullUrl(project.imageUrl)}
+                alt={`Image du projet ${project.name}`}
+                className="h-40 w-full object-cover rounded border mb-3"
+                loading="lazy"
+              />
 
-            <p className="text-gray-700 mb-2">
-              {getDescriptionSnippet(project.description)}
-            </p>
+              <p className="text-gray-700 mb-2">
+                {getDescriptionSnippet(project.description)}
+              </p>
 
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleEditClick(project)}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
-              >
-                ✏️ Modifier
-              </button>
-              <button
-                onClick={() => handleDelete(project._id)}
-                className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded"
-              >
-                🗑️ Supprimer
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleEditClick(project)}
+                  className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+                >
+                  ✏️ Modifier
+                </button>
+                <button
+                  onClick={() => handleDelete(project._id)}
+                  className="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded"
+                >
+                  🗑️ Supprimer
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
-      {/* Info debug utile */}
+      {/* Debug utile, à masquer en prod si tu veux */}
       <p className="text-xs text-gray-400 mt-6">API: {API_URL}</p>
     </div>
   );

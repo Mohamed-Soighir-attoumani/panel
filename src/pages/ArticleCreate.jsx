@@ -1,22 +1,9 @@
 // src/pages/ArticleCreate.jsx
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import VisibilityControls from "../components/VisibilityControls";
-import { API_URL } from "../config";
-
-function buildAuthHeaders() {
-  const token = localStorage.getItem("token") || "";
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import api from "../api";
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
-
-// ---- axios instance avec baseURL BACKEND ----
-const api = axios.create({
-  baseURL: API_URL, // ex: https://backend-admin-tygd.onrender.com/api
-  timeout: 20000,
-  validateStatus: () => true,
-});
 
 export default function ArticleCreate() {
   const [me, setMe] = useState(null);
@@ -47,7 +34,8 @@ export default function ArticleCreate() {
     (async () => {
       setLoadingMe(true);
       try {
-        const res = await api.get("/me", { headers: buildAuthHeaders() });
+        // ⚠️ IMPORTANT: toujours préfixer par /api et passer par l'instance `api`
+        const res = await api.get("/api/me", { validateStatus: () => true });
         if (res.status === 200) {
           const user = res.data?.user || (res.data?.role ? res.data : null);
           setMe(user || null);
@@ -60,8 +48,7 @@ export default function ArticleCreate() {
           return;
         }
       } catch (e) {
-        // silencieux, on laisse l'utilisateur retenter
-        console.warn("GET /me failed:", e?.message || e);
+        console.warn("GET /api/me failed:", e?.message || e);
       } finally {
         setLoadingMe(false);
       }
@@ -94,6 +81,7 @@ export default function ArticleCreate() {
       fd.append("content", form.content);
       if (form.imageFile) fd.append("image", form.imageFile);
 
+      // Visibilité & planification
       fd.append("visibility", visibility.visibility);
       if (visibility.communeId) fd.append("communeId", visibility.communeId);
       if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
@@ -103,13 +91,16 @@ export default function ArticleCreate() {
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
+      // Métadonnées
       if (form.authorName) fd.append("authorName", form.authorName);
       if (form.publisher) fd.append("publisher", form.publisher);
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status);
 
-      // >>> ICI on utilise l'instance axios baseURL=API_URL
-      const res = await api.post("/articles", fd, { headers: buildAuthHeaders() });
+      // ⚠️ IMPORTANT: passer par l'instance `api` et préfixer par /api
+      const res = await api.post("/api/articles", fd, {
+        validateStatus: () => true,
+      });
 
       if (res.status === 201 || (res.status >= 200 && res.status < 300)) {
         alert("Article créé ✅");
@@ -130,12 +121,12 @@ export default function ArticleCreate() {
       } else {
         const msg = res?.data?.message || res?.statusText || `Erreur (HTTP ${res.status})`;
         alert(`❌ ${msg}`);
-        console.error("POST /articles error:", res.status, msg, res.data);
+        console.error("POST /api/articles error:", res.status, msg, res.data);
       }
     } catch (err) {
       const msg = err?.message || "Erreur réseau/CORS.";
       alert(`❌ ${msg}`);
-      console.error("POST /articles exception:", err);
+      console.error("POST /api/articles exception:", err);
     } finally {
       setSubmitting(false);
     }

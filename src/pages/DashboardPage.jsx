@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
@@ -11,27 +11,32 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-// Normalise les libellés de type
-function canonicalizeLabel(raw) {
+// Normalise une chaîne en clé canonique
+const canonicalizeLabel = (raw) => {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
   const s = String(raw).trim();
   const key = s.toLowerCase();
   const label = s.charAt(0).toUpperCase() + s.slice(1);
   return { key, label };
+};
+
+const normCid = (id) => String(id || "").trim().toLowerCase();
+
+// Commune à utiliser pour les requêtes
+function getSelectedCommuneId(me) {
+  if (!me) return "";
+  if (me.role === "admin") return normCid(me.communeId);
+  if (me.role === "superadmin") {
+    const v = (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
+    return normCid(v);
+  }
+  return "";
 }
 
 function buildHeaders(me) {
   const headers = {};
-  // Admin : forcer sa commune
-  if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = me.communeId;
-  }
-  // Superadmin : commune choisie (vide => toutes)
-  if (me?.role === "superadmin") {
-    const selectedCid =
-      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
-    if (selectedCid) headers["x-commune-id"] = selectedCid;
-  }
+  const cid = getSelectedCommuneId(me);
+  if (cid) headers["x-commune-id"] = cid;
   return headers;
 }
 
@@ -47,48 +52,48 @@ const DashboardPage = () => {
 
   const [bannerError, setBannerError] = useState("");
 
- // charge /me depuis l'API (tolérant au doublon /api)
-useEffect(() => {
-  (async () => {
-    try {
-      // 1) Essai principal
-      let res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
+  // Pour éviter les setState après un unmount
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
-      // 2) Fallback si 404 (souvent dû à /api déjà dans baseURL)
-      if (res.status === 404) {
-        try {
-          res = await api.get("/me", { timeout: 15000, validateStatus: () => true });
-        } catch (_) {
-          // on laisse res tel quel pour la suite
+  // charge /me depuis l'API (tolérant /api doublé)
+  useEffect(() => {
+    (async () => {
+      try {
+        let res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
+        if (res.status === 404) {
+          try {
+            res = await api.get("/me", { timeout: 15000, validateStatus: () => true });
+          } catch (_) {}
         }
-      }
-
-      if (res.status === 200) {
-        const user = res?.data?.user || null;
-        if (!user) throw new Error("Réponse /me inattendue");
-        setMe(user);
-        localStorage.setItem("me", JSON.stringify(user));
-        setBannerError("");
-      } else if (res.status === 401 || res.status === 403) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("token_orig");
-        window.location.href = "/login";
-        return;
-      } else {
-        setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
+        if (res.status === 200) {
+          const user = res?.data?.user || res?.data || null;
+          if (!user) throw new Error("Réponse /me inattendue");
+          if (!mountedRef.current) return;
+          setMe(user);
+          localStorage.setItem("me", JSON.stringify(user));
+          setBannerError("");
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("token_orig");
+          window.location.href = "/login";
+          return;
+        } else {
+          const cached = localStorage.getItem("me");
+          if (cached) setMe(JSON.parse(cached));
+          setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
+        }
+      } catch (e) {
         const cached = localStorage.getItem("me");
         if (cached) setMe(JSON.parse(cached));
+        setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+      } finally {
+        if (mountedRef.current) setLoadingMe(false);
       }
-    } catch (e) {
-      setBannerError("Erreur réseau/CORS lors de la vérification de session.");
-      const cached = localStorage.getItem("me");
-      if (cached) setMe(JSON.parse(cached));
-    } finally {
-      setLoadingMe(false);
-    }
-  })();
-}, []);
-
+    })();
+  }, []);
 
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
@@ -101,77 +106,71 @@ useEffect(() => {
     return false;
   }, []);
 
-  // --- NOUVEAU: fetchData tolérant, sans throw global
+  // --- Récupération incidents + notifications (stable)
   const fetchData = useCallback(async () => {
     if (loadingMe) return;
+
     const headers = buildHeaders(me);
-    const qs = period === "all" ? "" : `?period=${period}`;
+    const cid = getSelectedCommuneId(me);
+    const qsPeriod = period === "all" ? "" : `period=${period}`;
+    const qsCid = cid ? `communeId=${encodeURIComponent(cid)}` : "";
+    const query = [qsPeriod, qsCid].filter(Boolean).join("&");
+    const suffix = query ? `?${query}` : "";
 
     let incOk = false;
     let notifOk = false;
 
+    // On récupère TOUT en parallèle
     try {
-      // Incidents
-      const incidentRes = await api.get(`/api/incidents${qs}`, {
-        headers,
-        validateStatus: () => true,
-      });
+      const [incidentRes, notifRes] = await Promise.all([
+        api.get(`/api/incidents${suffix}`, { headers, validateStatus: () => true }),
+        api.get(`/api/notifications${cid ? `?communeId=${encodeURIComponent(cid)}` : ""}`, {
+          headers,
+          validateStatus: () => true,
+        }),
+      ]);
 
+      // --- Incidents
       if (incidentRes.status === 200) {
         const d = incidentRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setIncidents(arr);
+        if (mountedRef.current) setIncidents(arr);
         incOk = true;
       } else if (incidentRes.status === 404) {
-        // Endpoint non présent : mode dégradé silencieux
-        console.warn("[dashboard] /api/incidents introuvable (404) → incidents=[]");
-        setIncidents([]);
+        // fail-soft si endpoint absent
+        if (mountedRef.current) setIncidents([]);
         incOk = true;
       } else if (!handleAuthError({ response: { status: incidentRes.status } })) {
         console.warn("[dashboard] incidents HTTP", incidentRes.status, incidentRes.data);
-        setIncidents([]); // fail-soft
+        if (mountedRef.current) setIncidents([]);
       }
-    } catch (err) {
-      if (!handleAuthError(err)) {
-        console.error("Erreur fetch incidents:", err);
-        setIncidents([]); // fail-soft
-      }
-    }
 
-    try {
-      // Notifications
-      const notifRes = await api.get(`/api/notifications`, {
-        headers,
-        validateStatus: () => true,
-      });
-
+      // --- Notifications
       if (notifRes.status === 200) {
         const d = notifRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setNotifications(arr);
+        if (mountedRef.current) setNotifications(arr);
         notifOk = true;
       } else if (notifRes.status === 404) {
-        console.warn("[dashboard] /api/notifications introuvable (404) → notifications=[]");
-        setNotifications([]);
+        if (mountedRef.current) setNotifications([]);
         notifOk = true;
       } else if (!handleAuthError({ response: { status: notifRes.status } })) {
         console.warn("[dashboard] notifications HTTP", notifRes.status, notifRes.data);
-        setNotifications([]); // fail-soft
+        if (mountedRef.current) setNotifications([]);
       }
-    } catch (err) {
-      if (!handleAuthError(err)) {
-        console.error("Erreur fetch notifications:", err);
-        setNotifications([]); // fail-soft
-      }
-    }
 
-    // Activité (ne plante jamais)
-    try {
-      const realIncidents = incOk ? incidents : [];
-      const realNotifications = notifOk ? notifications : [];
+      // Construire l'activité directement à partir des réponses (pas du state)
+      const incForActivity =
+        incidentRes?.status === 200
+          ? (Array.isArray(incidentRes.data) ? incidentRes.data : incidentRes.data?.items) || []
+          : [];
+      const notifForActivity =
+        notifRes?.status === 200
+          ? (Array.isArray(notifRes.data) ? notifRes.data : notifRes.data?.items) || []
+          : [];
 
       const nextActivity = [
-        ...(realIncidents || []).slice(0, 3).map((inc) => {
+        ...incForActivity.slice(0, 3).map((inc) => {
           const t = inc?.type || inc?.title || "Inconnu";
           return {
             type: "incident",
@@ -179,80 +178,96 @@ useEffect(() => {
             time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
           };
         }),
-        ...(realNotifications || []).slice(0, 3).map((notif) => ({
+        ...notifForActivity.slice(0, 3).map((notif) => ({
           type: "notification",
           text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
           time: notif?.createdAt ? new Date(notif.createdAt).toLocaleString("fr-FR") : "Date inconnue",
         })),
       ];
-      setActivity(nextActivity);
-    } catch (e) {
-      console.warn("Construction activité échouée:", e);
-      setActivity([]);
+      if (mountedRef.current) setActivity(nextActivity);
+    } catch (err) {
+      if (!handleAuthError(err)) {
+        console.error("Erreur fetchData:", err);
+        if (mountedRef.current) {
+          setIncidents([]);
+          setNotifications([]);
+          setActivity([]);
+        }
+      }
     }
 
     // Bannière: afficher seulement si les 2 ont VRAIMENT échoué
-    if (!incOk && !notifOk) {
-      setBannerError("Erreur lors du chargement des données.");
-    } else {
-      // on efface l’erreur si au moins une source est OK
-      setBannerError((prev) =>
-        prev && prev.includes("chargement des données") ? "" : prev
-      );
+    if (mountedRef.current) {
+      if (!incOk && !notifOk) {
+        setBannerError("Erreur lors du chargement des données.");
+      } else {
+        setBannerError((prev) => (prev && prev.includes("chargement des données") ? "" : prev));
+      }
     }
-  }, [handleAuthError, loadingMe, me, period, incidents, notifications]);
+  }, [handleAuthError, loadingMe, me, period]);
 
+  // --- Compteur d'utilisateurs (robuste pour admin ET superadmin)
   const fetchDeviceCount = useCallback(async () => {
     if (loadingMe) return;
-    try {
-      const headers = buildHeaders(me);
+    const headers = buildHeaders(me);
+    const cid = getSelectedCommuneId(me);
 
-      // endpoint moderne /count (admin)
-      const res = await api.get(`/api/devices/count?activeDays=30`, {
-        headers,
-        validateStatus: () => true,
-      });
+    // 1) Essai endpoint moderne count (avec header ET query pour maximiser la compatibilité)
+    try {
+      const url = `/api/devices/count?activeDays=30${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
+      const res = await api.get(url, { headers, validateStatus: () => true });
 
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
-        setDeviceCount(res.data.count);
-        setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+        if (mountedRef.current) setDeviceCount(res.data.count);
+        if (mountedRef.current) {
+          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+        }
         return;
       }
 
-      // Fallback /api/devices (lecture total)
-      if (res.status === 404) {
-        const fallback = await api.get(`/api/devices?page=1&pageSize=1`, {
-          headers,
-          validateStatus: () => true,
-        });
+      // 2) Fallback si 404 ou 501/403 → pagination minimale pour lire "total"
+      if ([404, 501, 403].includes(res.status)) {
+        const url2 = `/api/devices?page=1&pageSize=1${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
+        const fallback = await api.get(url2, { headers, validateStatus: () => true });
         if (fallback.status === 200 && typeof fallback.data?.total === "number") {
-          setDeviceCount(fallback.data.total);
-          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+          if (mountedRef.current) setDeviceCount(fallback.data.total);
+          if (mountedRef.current) {
+            setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
+          }
+          return;
+        }
+
+        // 3) Fallback absolu: si l’API renvoie une liste directe
+        if (fallback.status === 200 && Array.isArray(fallback.data)) {
+          if (mountedRef.current) setDeviceCount(fallback.data.length);
           return;
         }
       }
 
       if (!handleAuthError({ response: { status: res.status } })) {
-        console.warn("devices/count non disponible, code:", res.status);
+        console.warn("devices/count indisponible, code:", res.status);
       }
     } catch (err) {
       if (!handleAuthError(err)) {
-        console.error("Erreur fetchDeviceCount:", err);
+        console.error("Erreur fetchDeviceCount (count):", err);
       }
     }
   }, [handleAuthError, loadingMe, me]);
 
+  // Lancer les fetchs + rafraîchissement périodique
   useEffect(() => {
     fetchData();
     fetchDeviceCount();
+
     const interval = setInterval(() => {
       fetchData();
       fetchDeviceCount();
     }, 30000);
+
     return () => clearInterval(interval);
   }, [fetchData, fetchDeviceCount]);
 
-  // ==== Répartition par types
+  // ==== Répartition par types (à partir du state incidents)
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
     for (const inc of incidents) {
@@ -348,6 +363,9 @@ useEffect(() => {
     return <div className="p-6">Chargement…</div>;
   }
 
+  const isSuperadmin = me?.role === "superadmin";
+  const selectedCid = getSelectedCommuneId(me);
+
   return (
     <div className="p-4 sm:p-6">
       {bannerError && (
@@ -374,13 +392,13 @@ useEffect(() => {
           </select>
 
           {/* Sélecteur commune pour superadmin */}
-          {me?.role === "superadmin" && (
+          {isSuperadmin && (
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
               className="border px-2 py-1 rounded w-full sm:w-64"
-              defaultValue={localStorage.getItem("selectedCommuneId") || ""}
+              defaultValue={selectedCid}
               onBlur={(e) => {
-                const v = e.target.value.trim();
+                const v = normCid(e.target.value);
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
                 // rechargements ciblés

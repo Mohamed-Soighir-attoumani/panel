@@ -166,6 +166,10 @@ const ArticleListPage = () => {
       {successMsg && <p className="text-green-600 mb-4">{successMsg}</p>}
       {errorMsg && <p className="text-red-600 mb-4">{errorMsg}</p>}
 
+      {articles.length === 0 && !editingArticle && !errorMsg && (
+        <p className="text-gray-500 mb-6">Aucun article pour le moment.</p>
+      )}
+
       {editingArticle && (
         <div className="mb-6 p-4 border rounded bg-gray-50">
           <h2 className="text-xl font-semibold mb-4">✏️ Modifier l'article</h2>

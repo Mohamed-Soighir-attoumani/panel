@@ -1,12 +1,11 @@
 // src/pages/DashboardPage.jsx
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import axios from "axios";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
 import IncidentsChart from "../components/IncidentsChart";
 import DevicesTable from "../components/DevicesTable";
-import { API_URL } from "../config";
+import api from "../api";
 
 ChartJS.register(...registerables, ChartDataLabels);
 
@@ -22,11 +21,8 @@ function canonicalizeLabel(raw) {
 }
 
 function buildHeaders(me) {
-  const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  // Admin : sa commune
+  // Admin : forcer sa commune
   if (me?.role === "admin" && me?.communeId) {
     headers["x-commune-id"] = me.communeId;
   }
@@ -51,13 +47,11 @@ const DashboardPage = () => {
 
   const [bannerError, setBannerError] = useState("");
 
-  // charge /me (⚠️ API_URL contient déjà /api)
+  // charge /me depuis l'API (⚠️ on passe par api et on préfixe /api)
   useEffect(() => {
     (async () => {
       try {
-        const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${API_URL}/me`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        const res = await api.get("/api/me", {
           timeout: 15000,
           validateStatus: () => true,
         });
@@ -108,16 +102,16 @@ const DashboardPage = () => {
       const headers = buildHeaders(me);
       const qs = period === "all" ? "" : `?period=${period}`;
 
-      // ⚠️ pas de /api redoublé
+      // Appels via api (baseURL sans /api) -> on préfixe /api ici
       const [incidentRes, notifRes] = await Promise.all([
-        axios.get(`${API_URL}/incidents${qs}`, { headers, validateStatus: () => true }),
-        axios.get(`${API_URL}/notifications`, { headers, validateStatus: () => true }),
+        api.get(`/api/incidents${qs}`, { headers, validateStatus: () => true }),
+        api.get(`/api/notifications`, { headers, validateStatus: () => true }),
       ]);
 
-      if (incidentRes.status >= 400 && !handleAuthError(incidentRes)) {
+      if (incidentRes.status >= 400 && !handleAuthError({ response: { status: incidentRes.status } })) {
         throw new Error(`Incidents HTTP ${incidentRes.status}`);
       }
-      if (notifRes.status >= 400 && !handleAuthError(notifRes)) {
+      if (notifRes.status >= 400 && !handleAuthError({ response: { status: notifRes.status } })) {
         throw new Error(`Notifications HTTP ${notifRes.status}`);
       }
 
@@ -144,6 +138,7 @@ const DashboardPage = () => {
             : "Date inconnue",
         })),
       ]);
+      setBannerError("");
     } catch (err) {
       if (!handleAuthError(err)) {
         console.error("Erreur fetchData:", err);
@@ -156,12 +151,13 @@ const DashboardPage = () => {
     if (loadingMe) return;
     try {
       const headers = buildHeaders(me);
-      const res = await axios.get(`${API_URL}/devices/count`, {
+      const res = await api.get(`/api/devices/count`, {
         headers,
         validateStatus: () => true,
       });
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
+        setBannerError("");
       } else if (!handleAuthError({ response: { status: res.status } })) {
         setBannerError(`Erreur chargement utilisateurs (HTTP ${res.status}).`);
       }

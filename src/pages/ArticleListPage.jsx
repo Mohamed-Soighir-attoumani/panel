@@ -1,18 +1,50 @@
 // src/pages/ArticleListPage.jsx
 import React, { useState, useEffect } from "react";
 import api from "../api";
-import { BASE_URL, ARTICLES_PATH } from "../config";
+import { BASE_URL } from "../config";
+
+const ENDPOINT_CACHE_KEY = "securidem:articlesEndpoint";
+const CANDIDATES = ["/api/articles", "/articles"]; // essaie avec puis sans /api
 
 const toFullUrl = (p) => {
   if (!p) return "https://via.placeholder.com/600x200.png?text=Aucune+image";
   if (typeof p === "string" && /^https?:\/\//i.test(p)) return p;
-  // Le backend sert /uploads à la racine (pas sous /api)
   return `${BASE_URL.replace(/\/$/, "")}${p.startsWith("/") ? "" : "/"}${p}`;
 };
 
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 
+// Découvre l'endpoint qui répond et met en cache
+async function resolveArticlesEndpoint() {
+  const cached = localStorage.getItem(ENDPOINT_CACHE_KEY);
+  if (cached) return cached;
+
+  for (const path of CANDIDATES) {
+    try {
+      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
+      // 200 avec tableau => OK
+      if (res.status === 200 && (Array.isArray(res.data) || res.data?.items)) {
+        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+      // 401/403 => chemin correct mais auth requise => on retient quand même
+      if (res.status === 401 || res.status === 403) {
+        localStorage.setItem(ENDPOINT_CACHE_KEY, path);
+        return path;
+      }
+    } catch {
+      // on tente le suivant
+    }
+  }
+  // défaut si tout échoue
+  return "/api/articles";
+}
+
 const ArticleListPage = () => {
+  const [endpoint, setEndpoint] = useState(
+    localStorage.getItem(ENDPOINT_CACHE_KEY) || "/api/articles"
+  );
+
   const [articles, setArticles] = useState([]);
   const [editingArticle, setEditingArticle] = useState(null);
 
@@ -31,22 +63,28 @@ const ArticleListPage = () => {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    fetchArticles();
+    (async () => {
+      const ep = await resolveArticlesEndpoint();
+      setEndpoint(ep);
+      await fetchArticles(ep);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchArticles = async () => {
+  const fetchArticles = async (ep = endpoint) => {
     try {
-      // IMPORTANT : les routes sont bien sous /api
-      const res = await api.get(ARTICLES_PATH);
+      const res = await api.get(ep);
       const data = Array.isArray(res.data) ? res.data : res.data?.items || [];
       setArticles(data);
       setErrorMsg("");
     } catch (err) {
-      console.error("Erreur chargement articles :", err);
-      setErrorMsg(
-        `❌ Impossible de charger les articles (${err?.response?.status || "réseau"}).`
-      );
+      console.error("Erreur chargement articles :", err?.response?.status, err?.message);
+      const status = err?.response?.status;
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        "Impossible de charger les articles";
+      setErrorMsg(`❌ ${msg} (${status || "réseau"}).`);
     }
   };
 
@@ -97,12 +135,12 @@ const ArticleListPage = () => {
     if (sourceUrl) formData.append("sourceUrl", sourceUrl.trim());
 
     try {
-      await api.put(`${ARTICLES_PATH}/${editingArticle._id}`, formData);
+      await api.put(`${endpoint}/${editingArticle._id}`, formData);
       setSuccessMsg("✅ Article modifié avec succès.");
       resetForm();
       fetchArticles();
     } catch (err) {
-      console.error("Erreur mise à jour article :", err);
+      console.error("Erreur mise à jour article :", err?.response?.status, err?.message);
       const msg =
         err?.response?.data?.message ||
         `Erreur lors de la mise à jour (${err?.response?.status || "réseau"}).`;
@@ -113,11 +151,11 @@ const ArticleListPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet article ?")) return;
     try {
-      await api.delete(`${ARTICLES_PATH}/${id}`);
+      await api.delete(`${endpoint}/${id}`);
       setSuccessMsg("✅ Article supprimé.");
       fetchArticles();
     } catch (err) {
-      console.error("Erreur suppression article :", err);
+      console.error("Erreur suppression article :", err?.response?.status, err?.message);
       const msg =
         err?.response?.data?.message ||
         `Erreur lors de la suppression (${err?.response?.status || "réseau"}).`;
@@ -334,6 +372,11 @@ const ArticleListPage = () => {
           </li>
         ))}
       </ul>
+
+      {/* petit debug utile */}
+      <p className="text-xs text-gray-400 mt-6">
+        Endpoint articles détecté : <code>{endpoint}</code>
+      </p>
     </div>
   );
 };

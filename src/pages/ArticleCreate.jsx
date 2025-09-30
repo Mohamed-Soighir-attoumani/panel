@@ -3,13 +3,64 @@ import React, { useEffect, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
 
+/* Helpers */
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
+
+const LS_ME_PATH = "securidem:mePath";
+const LS_ARTICLES_PATH = "securidem:articlesPath";
+
+/** Détecte /api/me -> sinon /me */
+async function resolveMePath() {
+  const cached = localStorage.getItem(LS_ME_PATH);
+  if (cached) return cached;
+
+  const candidates = ["/api/me", "/me"];
+  for (const path of candidates) {
+    try {
+      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
+      // 200 ou 401/403 indiquent que la route existe bien
+      if (res.status === 200 || res.status === 401 || res.status === 403) {
+        localStorage.setItem(LS_ME_PATH, path);
+        return path;
+      }
+    } catch (_) {}
+  }
+  // défaut
+  return "/api/me";
+}
+
+/** Détecte /api/articles -> sinon /articles */
+async function resolveArticlesPath() {
+  const cached = localStorage.getItem(LS_ARTICLES_PATH);
+  if (cached) return cached;
+
+  const candidates = ["/api/articles", "/articles"];
+  for (const path of candidates) {
+    try {
+      // GET: 200 (souvent tableau) ou 401/403 suffisent à valider le chemin
+      const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
+      const ok200 =
+        res.status === 200 && (Array.isArray(res.data) || Array.isArray(res.data?.items));
+      if (ok200 || res.status === 401 || res.status === 403) {
+        localStorage.setItem(LS_ARTICLES_PATH, path);
+        return path;
+      }
+    } catch (_) {}
+  }
+  // défaut
+  return "/api/articles";
+}
 
 export default function ArticleCreate() {
   const [me, setMe] = useState(null);
   const [loadingMe, setLoadingMe] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState(null);
+
+  const [mePath, setMePath] = useState(localStorage.getItem(LS_ME_PATH) || "/api/me");
+  const [articlesPath, setArticlesPath] = useState(
+    localStorage.getItem(LS_ARTICLES_PATH) || "/api/articles"
+  );
 
   const [form, setForm] = useState({
     title: "",
@@ -34,13 +85,22 @@ export default function ArticleCreate() {
     (async () => {
       setLoadingMe(true);
       try {
-        // ⚠️ IMPORTANT: toujours préfixer par /api et passer par l'instance `api`
-        const res = await api.get("/api/me", { validateStatus: () => true });
+        // 1) Résoudre dynamiquement les chemins
+        const [mp, ap] = await Promise.all([resolveMePath(), resolveArticlesPath()]);
+        setMePath(mp);
+        setArticlesPath(ap);
+
+        // 2) Charger /me via le chemin résolu
+        const res = await api.get(mp, { validateStatus: () => true, timeout: 15000 });
         if (res.status === 200) {
           const user = res.data?.user || (res.data?.role ? res.data : null);
           setMe(user || null);
           if (user?.role === "admin") {
-            setVisibility((v) => ({ ...v, communeId: user.communeId || "", visibility: "local" }));
+            setVisibility((v) => ({
+              ...v,
+              communeId: user.communeId || "",
+              visibility: "local",
+            }));
           }
         } else if (res.status === 401 || res.status === 403) {
           localStorage.removeItem("token");
@@ -48,7 +108,7 @@ export default function ArticleCreate() {
           return;
         }
       } catch (e) {
-        console.warn("GET /api/me failed:", e?.message || e);
+        console.warn("GET me failed:", e?.message || e);
       } finally {
         setLoadingMe(false);
       }
@@ -97,10 +157,8 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status);
 
-      // ⚠️ IMPORTANT: passer par l'instance `api` et préfixer par /api
-      const res = await api.post("/api/articles", fd, {
-        validateStatus: () => true,
-      });
+      // ⚠️ Utilise l’endpoint détecté (ex: /api/articles ou /articles)
+      const res = await api.post(articlesPath, fd, { validateStatus: () => true, timeout: 30000 });
 
       if (res.status === 201 || (res.status >= 200 && res.status < 300)) {
         alert("Article créé ✅");
@@ -121,12 +179,12 @@ export default function ArticleCreate() {
       } else {
         const msg = res?.data?.message || res?.statusText || `Erreur (HTTP ${res.status})`;
         alert(`❌ ${msg}`);
-        console.error("POST /api/articles error:", res.status, msg, res.data);
+        console.error(`POST ${articlesPath} error:`, res.status, msg, res.data);
       }
     } catch (err) {
       const msg = err?.message || "Erreur réseau/CORS.";
       alert(`❌ ${msg}`);
-      console.error("POST /api/articles exception:", err);
+      console.error("POST article exception:", err);
     } finally {
       setSubmitting(false);
     }
@@ -246,6 +304,11 @@ export default function ArticleCreate() {
             Réinitialiser
           </button>
         </div>
+
+        {/* Debug utile pour voir le chemin actif */}
+        <p className="text-xs text-gray-400 mt-4">
+          mePath: <code>{mePath}</code> • articlesPath: <code>{articlesPath}</code>
+        </p>
       </form>
     </div>
   );

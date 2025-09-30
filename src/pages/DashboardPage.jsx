@@ -47,43 +47,48 @@ const DashboardPage = () => {
 
   const [bannerError, setBannerError] = useState("");
 
-  // charge /me depuis l'API (⚠️ on passe par api et on préfixe /api)
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await api.get("/api/me", {
-          timeout: 15000,
-          validateStatus: () => true,
-        });
+ // charge /me depuis l'API (tolérant au doublon /api)
+useEffect(() => {
+  (async () => {
+    try {
+      // 1) Essai principal
+      let res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
 
-        if (res.status === 200) {
-          const user = res?.data?.user || null;
-          if (!user) throw new Error("Réponse /me inattendue");
-          setMe(user);
-          localStorage.setItem("me", JSON.stringify(user));
-          setBannerError("");
-        } else if (res.status === 401 || res.status === 403) {
-          // déconnexion uniquement si non autorisé
-          localStorage.removeItem("token");
-          localStorage.removeItem("token_orig");
-          window.location.href = "/login";
-          return;
-        } else {
-          // ne pas déconnecter sur 404/500
-          setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
-          // essai d'utiliser un "me" local pour afficher quand même le tableau de bord
-          const cached = localStorage.getItem("me");
-          if (cached) setMe(JSON.parse(cached));
+      // 2) Fallback si 404 (souvent dû à /api déjà dans baseURL)
+      if (res.status === 404) {
+        try {
+          res = await api.get("/me", { timeout: 15000, validateStatus: () => true });
+        } catch (_) {
+          // on laisse res tel quel pour la suite
         }
-      } catch (e) {
-        setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+      }
+
+      if (res.status === 200) {
+        const user = res?.data?.user || null;
+        if (!user) throw new Error("Réponse /me inattendue");
+        setMe(user);
+        localStorage.setItem("me", JSON.stringify(user));
+        setBannerError("");
+      } else if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("token_orig");
+        window.location.href = "/login";
+        return;
+      } else {
+        setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
         const cached = localStorage.getItem("me");
         if (cached) setMe(JSON.parse(cached));
-      } finally {
-        setLoadingMe(false);
       }
-    })();
-  }, []);
+    } catch (e) {
+      setBannerError("Erreur réseau/CORS lors de la vérification de session.");
+      const cached = localStorage.getItem("me");
+      if (cached) setMe(JSON.parse(cached));
+    } finally {
+      setLoadingMe(false);
+    }
+  })();
+}, []);
+
 
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;

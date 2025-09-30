@@ -1,9 +1,11 @@
 // src/config.js
-// BASE_URL = racine serveur backend (sans /api)
-// API_URL  = endpoint API (avec /api)
+// Base de l’API (sans /api à la fin)
+const RAW = process.env.REACT_APP_API_URL || "https://backend-admin-tygd.onrender.com";
+export const API_URL = RAW.replace(/\/+$/, "");
+// Racine (pour les fichiers statiques /uploads si nécessaire)
+export const BASE_URL = API_URL;
 
-export const BASE_URL = 'https://backend-admin-tygd.onrender.com'.replace(/\/+$/, '');
-export const API_URL  = `${BASE_URL}/api`;
-
-// (optionnel) clé app s'il t'en faut une côté panel
-export const APP_KEY = import.meta.env?.VITE_APP_KEY ?? 'ton-secret-app';
+// Chemins d’API REST montés côté backend
+export const ARTICLES_PATH  = "/api/articles";
+export const PROJECTS_PATH  = "/api/projects";
+export const INCIDENTS_PATH = "/api/incidents";

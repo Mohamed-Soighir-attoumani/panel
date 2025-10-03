@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config"; // ⬅️ on n'utilise plus INCIDENTS_PATH ici
+import { API_URL } from "../config";
 
 // ===== Cartes =====
 const IncidentMap = ({ latitude, longitude }) => (
@@ -51,6 +51,7 @@ const GlobalIncidentMap = ({ incidents }) => {
 // ===== Helpers communs =====
 const apiBase = () => (API_URL || "").replace(/\/+$/, "");
 const withApi = (path = "") => `${apiBase()}${path.startsWith("/") ? "" : "/"}${path}`;
+const lc = (s) => (s == null ? "" : String(s).trim().toLowerCase());
 
 // Essaie /api/xxx puis /xxx pour éviter le /api/api ou l’absence de /api
 async function multiTry(method, path, { headers = {}, params, data, timeout = 20000 } = {}) {
@@ -67,7 +68,6 @@ async function multiTry(method, path, { headers = {}, params, data, timeout = 20
         validateStatus: () => true,
       });
       if (res.status === 200 || res.status === 201) return res;
-      // sinon on tente l’URL suivante
     } catch {
       // continue
     }
@@ -75,33 +75,34 @@ async function multiTry(method, path, { headers = {}, params, data, timeout = 20
   return null;
 }
 
-// === helper headers ===
+// === headers : IMPORTANT -> admin utilise me.communeId OU selectedCommuneId
 function buildHeaders(me, selectedCommuneId) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  // Ajoute x-commune-id pour maximiser les chances côté backend
-  if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = String(me.communeId).trim().toLowerCase();
+
+  let cid = "";
+  if (me?.role === "admin") {
+    cid = lc(me?.communeId || selectedCommuneId || "");
+  } else if (me?.role === "superadmin") {
+    cid = lc(selectedCommuneId || "");
   }
-  if (me?.role === "superadmin" && selectedCommuneId) {
-    headers["x-commune-id"] = String(selectedCommuneId).trim().toLowerCase();
-  }
+  if (cid) headers["x-commune-id"] = cid;
+
   headers.Accept = "application/json";
   return headers;
 }
 
-// === helper params (communeId côté requêtes) ===
+// === params : même logique que headers
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
-  // Admin: force sa commune
-  if (me?.role === "admin" && me?.communeId) {
-    params.communeId = String(me.communeId).trim().toLowerCase();
+  let cid = "";
+  if (me?.role === "admin") {
+    cid = lc(me?.communeId || selectedCommuneId || "");
+  } else if (me?.role === "superadmin") {
+    cid = lc(selectedCommuneId || "");
   }
-  // Superadmin: applique le filtre si choisi
-  if (me?.role === "superadmin" && selectedCommuneId) {
-    params.communeId = String(selectedCommuneId).trim().toLowerCase();
-  }
+  if (cid) params.communeId = cid;
   return params;
 }
 
@@ -139,7 +140,6 @@ const IncidentPage = () => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        // Essaie /api/me puis /me
         const r1 = await axios.get(withApi("/api/me"), {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
@@ -158,6 +158,12 @@ const IncidentPage = () => {
           const user = res?.data?.user || null;
           setMe(user);
           localStorage.setItem("me", JSON.stringify(user));
+          // ✅ si admin avec communeId, synchronise selectedCommuneId (fallback)
+          if (user?.role === "admin" && user?.communeId) {
+            const cid = lc(user.communeId);
+            localStorage.setItem("selectedCommuneId", cid);
+            setSelectedCommuneId(cid);
+          }
         } else if (res.status === 401 || res.status === 403) {
           localStorage.removeItem("token");
           window.location.href = "/login";
@@ -181,8 +187,6 @@ const IncidentPage = () => {
       (async () => {
         try {
           const headers = buildHeaders(me, selectedCommuneId);
-          let list = [];
-          // multiTry équivalent
           const r =
             (await multiTry("get", "communes", { headers, timeout: 15000 })) ||
             (await multiTry("get", "communes", { headers: {}, timeout: 15000 }));
@@ -194,9 +198,8 @@ const IncidentPage = () => {
             : Array.isArray(data?.data)
             ? data.data
             : [];
-          list = arr;
 
-          const normalized = (list || [])
+          const normalized = (arr || [])
             .map((c) => ({
               id: String(c.id ?? c._id ?? c.slug ?? c.code ?? "").trim(),
               name: String(c.name ?? c.label ?? c.communeName ?? "Commune").trim(),
@@ -290,7 +293,6 @@ const IncidentPage = () => {
         period: periodFilter || undefined,
       });
 
-      // multiTry GET incidents
       const response =
         (await multiTry("get", "incidents", { headers, params })) ||
         (await multiTry("get", "incidents", { headers: {}, params }));
@@ -426,7 +428,7 @@ const IncidentPage = () => {
   useEffect(() => {
     if (me?.role === "superadmin") {
       if (selectedCommuneId) {
-        localStorage.setItem("selectedCommuneId", selectedCommuneId);
+        localStorage.setItem("selectedCommuneId", lc(selectedCommuneId));
       } else {
         localStorage.removeItem("selectedCommuneId");
       }
@@ -436,8 +438,18 @@ const IncidentPage = () => {
   if (loading || loadingMe) return <div className="p-6">Chargement...</div>;
   if (error) return <div className="p-6 text-red-500">{error}</div>;
 
+  // Bandeau si admin sans commune (rappelle le problème réel côté compte)
+  const adminNoCommune = me?.role === "admin" && !lc(me?.communeId || selectedCommuneId);
+
   return (
     <div className="pt-[80px] px-6 pb-6">
+      {adminNoCommune && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
+          Votre compte administrateur n’est rattaché à aucune commune. Demandez à un superadmin de
+          vous assigner une commune. (Sinon, définissez « selectedCommuneId »).
+        </div>
+      )}
+
       <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
         🛠️ Incidents signalés
       </h1>

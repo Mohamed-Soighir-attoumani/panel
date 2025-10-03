@@ -4,9 +4,9 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL, INCIDENTS_PATH } from "../config";
+import { API_URL } from "../config"; // ⬅️ on n'utilise plus INCIDENTS_PATH ici
 
-// ====== Cartes ======
+// ===== Cartes =====
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
     center={[latitude, longitude]}
@@ -48,11 +48,46 @@ const GlobalIncidentMap = ({ incidents }) => {
   );
 };
 
+// ===== Helpers communs =====
+const apiBase = () => (API_URL || "").replace(/\/+$/, "");
+const withApi = (path = "") => `${apiBase()}${path.startsWith("/") ? "" : "/"}${path}`;
+
+// Essaie /api/xxx puis /xxx pour éviter le /api/api ou l’absence de /api
+async function multiTry(method, path, { headers = {}, params, data, timeout = 20000 } = {}) {
+  const candidates = [withApi(`/api/${path}`), withApi(`/${path}`)];
+  for (const url of candidates) {
+    try {
+      const res = await axios({
+        url,
+        method,
+        headers,
+        params,
+        data,
+        timeout,
+        validateStatus: () => true,
+      });
+      if (res.status === 200 || res.status === 201) return res;
+      // sinon on tente l’URL suivante
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
 // === helper headers ===
-function buildHeaders(me) {
+function buildHeaders(me, selectedCommuneId) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
+  // Ajoute x-commune-id pour maximiser les chances côté backend
+  if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = String(me.communeId).trim().toLowerCase();
+  }
+  if (me?.role === "superadmin" && selectedCommuneId) {
+    headers["x-commune-id"] = String(selectedCommuneId).trim().toLowerCase();
+  }
+  headers.Accept = "application/json";
   return headers;
 }
 
@@ -61,11 +96,11 @@ function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
   // Admin: force sa commune
   if (me?.role === "admin" && me?.communeId) {
-    params.communeId = me.communeId;
+    params.communeId = String(me.communeId).trim().toLowerCase();
   }
   // Superadmin: applique le filtre si choisi
   if (me?.role === "superadmin" && selectedCommuneId) {
-    params.communeId = selectedCommuneId;
+    params.communeId = String(selectedCommuneId).trim().toLowerCase();
   }
   return params;
 }
@@ -104,11 +139,20 @@ const IncidentPage = () => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        const res = await axios.get(`${API_URL}/me`, {
+        // Essaie /api/me puis /me
+        const r1 = await axios.get(withApi("/api/me"), {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
           validateStatus: () => true,
         });
+        const res =
+          r1.status === 200 || r1.status === 401 || r1.status === 403
+            ? r1
+            : await axios.get(withApi("/me"), {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                timeout: 15000,
+                validateStatus: () => true,
+              });
 
         if (res.status === 200) {
           const user = res?.data?.user || null;
@@ -136,29 +180,21 @@ const IncidentPage = () => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
         try {
-          const headers = buildHeaders(me);
+          const headers = buildHeaders(me, selectedCommuneId);
           let list = [];
-          try {
-            const r = await axios.get(`${API_URL}/api/communes`, { headers, timeout: 15000 });
-            const arr = Array.isArray(r.data)
-              ? r.data
-              : Array.isArray(r.data?.items)
-              ? r.data.items
-              : Array.isArray(r.data?.data)
-              ? r.data.data
-              : [];
-            list = arr;
-          } catch {
-            const r2 = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
-            const arr2 = Array.isArray(r2.data)
-              ? r2.data
-              : Array.isArray(r2.data?.items)
-              ? r2.data.items
-              : Array.isArray(r2.data?.data)
-              ? r2.data.data
-              : [];
-            list = arr2;
-          }
+          // multiTry équivalent
+          const r =
+            (await multiTry("get", "communes", { headers, timeout: 15000 })) ||
+            (await multiTry("get", "communes", { headers: {}, timeout: 15000 }));
+          const data = r?.data;
+          const arr = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.items)
+            ? data.items
+            : Array.isArray(data?.data)
+            ? data.data
+            : [];
+          list = arr;
 
           const normalized = (list || [])
             .map((c) => ({
@@ -175,7 +211,7 @@ const IncidentPage = () => {
         }
       })();
     }
-  }, [loadingMe, me]);
+  }, [loadingMe, me, selectedCommuneId]);
 
   // Init audio + déverrouillage autoplay
   useEffect(() => {
@@ -249,18 +285,21 @@ const IncidentPage = () => {
   const fetchIncidents = useCallback(async () => {
     if (loadingMe) return;
     try {
-      const headers = buildHeaders(me);
+      const headers = buildHeaders(me, selectedCommuneId);
       const params = buildParams(me, selectedCommuneId, {
         period: periodFilter || undefined,
       });
 
-      // IMPORTANT : route sous /api/incidents (INCIDENTS_PATH)
-      const response = await axios.get(`${API_URL}${INCIDENTS_PATH}`, {
-        headers,
-        params,
-        timeout: 20000,
-        validateStatus: () => true,
-      });
+      // multiTry GET incidents
+      const response =
+        (await multiTry("get", "incidents", { headers, params })) ||
+        (await multiTry("get", "incidents", { headers: {}, params }));
+
+      if (!response) {
+        setError("Impossible de charger les incidents.");
+        setLoading(false);
+        return;
+      }
 
       if (response.status === 401 || response.status === 403) {
         localStorage.removeItem("token");
@@ -308,15 +347,14 @@ const IncidentPage = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
-      const headers = buildHeaders(me);
+      const headers = buildHeaders(me, selectedCommuneId);
       const params = buildParams(me, selectedCommuneId);
-      const res = await axios.delete(`${API_URL}${INCIDENTS_PATH}/${id}`, {
-        headers,
-        params,
-        timeout: 15000,
-        validateStatus: () => true,
-      });
 
+      const res =
+        (await multiTry("delete", `incidents/${id}`, { headers, params, timeout: 15000 })) ||
+        (await multiTry("delete", `incidents/${id}`, { headers: {}, params, timeout: 15000 }));
+
+      if (!res) throw new Error("Endpoint indisponible");
       if (res.status === 401 || res.status === 403) {
         localStorage.removeItem("token");
         window.location.href = "/login";
@@ -350,15 +388,24 @@ const IncidentPage = () => {
 
   const handleUpdate = async () => {
     try {
-      const headers = { ...buildHeaders(me), "Content-Type": "application/json" };
+      const headers = { ...buildHeaders(me, selectedCommuneId), "Content-Type": "application/json" };
       const params = buildParams(me, selectedCommuneId);
-      const res = await axios.put(`${API_URL}${INCIDENTS_PATH}/${editIncidentId}`, editedIncident, {
-        headers,
-        params,
-        timeout: 20000,
-        validateStatus: () => true,
-      });
 
+      const res =
+        (await multiTry("put", `incidents/${editIncidentId}`, {
+          headers,
+          params,
+          data: editedIncident,
+          timeout: 20000,
+        })) ||
+        (await multiTry("put", `incidents/${editIncidentId}`, {
+          headers: {},
+          params,
+          data: editedIncident,
+          timeout: 20000,
+        }));
+
+      if (!res) throw new Error("Endpoint indisponible");
       if (res.status === 401 || res.status === 403) {
         localStorage.removeItem("token");
         window.location.href = "/login";

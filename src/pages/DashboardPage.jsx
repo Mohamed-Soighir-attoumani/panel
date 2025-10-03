@@ -66,16 +66,12 @@ async function tolerantGetMe() {
 
 // Essaie plusieurs chemins + les 2 variantes commune (header+query)
 async function multiTryGet(basePaths, { headers, query = "" }) {
-  // assure qu'on a bien ?... ou &... correct
   const q = query ? (basePaths[0]?.includes("?") ? `&${query}` : `?${query}`) : "";
   for (const p of basePaths) {
     try {
       const res = await api.get(`${p}${q}`, { headers, validateStatus: () => true });
       if (res.status === 200) return res;
-      // si 401/403/404 on tente le prochain chemin
-    } catch (_) {
-      // on tente le prochain chemin
-    }
+    } catch (_) {}
   }
   return null;
 }
@@ -163,7 +159,7 @@ const DashboardPage = () => {
     try {
       const incidentsRes =
         (await multiTryGet(["incidents", "/api/incidents"], { headers, query: communeQuery })) ||
-        (await multiTryGet(["incidents", "/api/incidents"], { headers: {}, query: communeQuery })) || // fallback sans header
+        (await multiTryGet(["incidents", "/api/incidents"], { headers: {}, query: communeQuery })) ||
         null;
 
       if (fetchId !== lastFetchIdRef.current) return;
@@ -175,7 +171,7 @@ const DashboardPage = () => {
       }
     } catch (err) {
       if (!handleAuthError(err)) {
-        // ne pas écraser l’état existant
+        // garder l’état existant
       }
     }
 
@@ -217,12 +213,18 @@ const DashboardPage = () => {
 
       if (fetchId !== lastDevicesFetchIdRef.current) return;
 
-      if (countRes && countRes.status === 200 && typeof countRes.data?.count === "number") {
-        setDeviceCount(countRes.data.count);
+      if (countRes && countRes.status === 200 && countRes.data) {
+        // ⬇️ clé de voûte : admin -> on affiche le total global (countAll) si dispo
+        const total =
+          (me?.role === "admin" && typeof countRes.data.countAll === "number")
+            ? countRes.data.countAll
+            : (typeof countRes.data.count === "number" ? countRes.data.count : 0);
+
+        setDeviceCount(total);
         return;
       }
 
-      // Fallback à la liste paginée pour avoir total
+      // Fallback à la liste paginée pour avoir total (scopé)
       const listQuery = `page=1&pageSize=1${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
       const listRes =
         (await multiTryGet(["devices", "/api/devices"], { headers, query: listQuery })) ||

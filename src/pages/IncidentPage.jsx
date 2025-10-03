@@ -4,9 +4,9 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { API_URL } from "../config";
+import { API_URL, INCIDENTS_PATH } from "../config";
 
-// ===== Cartes =====
+/* ================= Cartes ================= */
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
     center={[latitude, longitude]}
@@ -48,63 +48,43 @@ const GlobalIncidentMap = ({ incidents }) => {
   );
 };
 
-// ===== Helpers communs =====
-const apiBase = () => (API_URL || "").replace(/\/+$/, "");
-const withApi = (path = "") => `${apiBase()}${path.startsWith("/") ? "" : "/"}${path}`;
-const lc = (s) => (s == null ? "" : String(s).trim().toLowerCase());
+/* ============= Helpers requêtes (panel) ============= */
 
-// Essaie /api/xxx puis /xxx pour éviter le /api/api ou l’absence de /api
-async function multiTry(method, path, { headers = {}, params, data, timeout = 20000 } = {}) {
-  const candidates = [withApi(`/api/${path}`), withApi(`/${path}`)];
-  for (const url of candidates) {
-    try {
-      const res = await axios({
-        url,
-        method,
-        headers,
-        params,
-        data,
-        timeout,
-        validateStatus: () => true,
-      });
-      if (res.status === 200 || res.status === 201) return res;
-    } catch {
-      // continue
-    }
-  }
-  return null;
-}
-
-// === headers : IMPORTANT -> admin utilise me.communeId OU selectedCommuneId
+/**
+ * Headers :
+ *  - Authorization toujours si token
+ *  - x-commune-id UNIQUEMENT si superadmin + filtre saisi
+ */
 function buildHeaders(me, selectedCommuneId) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  let cid = "";
-  if (me?.role === "admin") {
-    cid = lc(me?.communeId || selectedCommuneId || "");
-  } else if (me?.role === "superadmin") {
-    cid = lc(selectedCommuneId || "");
+  if (me?.role === "superadmin") {
+    const cid = (selectedCommuneId || "").toString().trim().toLowerCase();
+    if (cid) headers["x-commune-id"] = cid;
   }
-  if (cid) headers["x-commune-id"] = cid;
-
-  headers.Accept = "application/json";
+  // Pour admin : pas de header x-commune-id → le backend forcera sa commune
   return headers;
 }
 
-// === params : même logique que headers
+/**
+ * Params :
+ *  - superadmin : envoie communeId si filtre choisi (sinon rien)
+ *  - admin : n’envoie rien (le backend filtre par sa commune automatiquement)
+ */
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
-  let cid = "";
-  if (me?.role === "admin") {
-    cid = lc(me?.communeId || selectedCommuneId || "");
-  } else if (me?.role === "superadmin") {
-    cid = lc(selectedCommuneId || "");
+
+  if (me?.role === "superadmin") {
+    const cid = (selectedCommuneId || "").toString().trim().toLowerCase();
+    if (cid) params.communeId = cid;
   }
-  if (cid) params.communeId = cid;
+
   return params;
 }
+
+/* ===================================================== */
 
 const IncidentPage = () => {
   const [me, setMe] = useState(null);
@@ -121,53 +101,41 @@ const IncidentPage = () => {
   const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
   const [communes, setCommunes] = useState([]);
-  const [selectedCommuneId, setSelectedCommuneId] = useState(
-    (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || ""
-  );
+  // IMPORTANT : par défaut, superadmin n’a AUCUN filtre → voit TOUT
+  const [selectedCommuneId, setSelectedCommuneId] = useState("");
 
   const prevIdsRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
 
-  // --- Gestion du son ---
+  // --- Gestion du son (nouveaux incidents détectés) ---
   const SOUND_URL =
     (typeof window !== "undefined" ? window.location.origin : "") + "/sounds/notification.mp3";
   const audioRef = useRef(null);
   const isAudioAllowedRef = useRef(false);
   const pendingPlayRef = useRef(false);
 
-  // charge /me (root) pour connaître le rôle/commune
+  /* --------- Chargement /me --------- */
   useEffect(() => {
     (async () => {
       try {
         const token = localStorage.getItem("token") || "";
-        const r1 = await axios.get(withApi("/api/me"), {
+        const res = await axios.get(`${API_URL}/me`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           timeout: 15000,
           validateStatus: () => true,
         });
-        const res =
-          r1.status === 200 || r1.status === 401 || r1.status === 403
-            ? r1
-            : await axios.get(withApi("/me"), {
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-                timeout: 15000,
-                validateStatus: () => true,
-              });
 
         if (res.status === 200) {
           const user = res?.data?.user || null;
           setMe(user);
           localStorage.setItem("me", JSON.stringify(user));
-          // ✅ si admin avec communeId, synchronise selectedCommuneId (fallback)
-          if (user?.role === "admin" && user?.communeId) {
-            const cid = lc(user.communeId);
-            localStorage.setItem("selectedCommuneId", cid);
-            setSelectedCommuneId(cid);
-          }
-        } else if (res.status === 401 || res.status === 403) {
+        } else if (res.status === 401) {
           localStorage.removeItem("token");
           window.location.href = "/login";
           return;
+        } else if (res.status === 403) {
+          // Reste sur la page mais signalera 403 lors des fetchs si besoin
+          setMe(null);
         } else {
           console.warn("GET /me non-200:", res.status, res.data);
           setMe(null);
@@ -181,25 +149,36 @@ const IncidentPage = () => {
     })();
   }, []);
 
-  // superadmin : charger les communes
+  /* --------- Liste des communes (superadmin) --------- */
   useEffect(() => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
         try {
           const headers = buildHeaders(me, selectedCommuneId);
-          const r =
-            (await multiTry("get", "communes", { headers, timeout: 15000 })) ||
-            (await multiTry("get", "communes", { headers: {}, timeout: 15000 }));
-          const data = r?.data;
-          const arr = Array.isArray(data)
-            ? data
-            : Array.isArray(data?.items)
-            ? data.items
-            : Array.isArray(data?.data)
-            ? data.data
-            : [];
+          let list = [];
+          try {
+            const r = await axios.get(`${API_URL}/api/communes`, { headers, timeout: 15000 });
+            const arr = Array.isArray(r.data)
+              ? r.data
+              : Array.isArray(r.data?.items)
+              ? r.data.items
+              : Array.isArray(r.data?.data)
+              ? r.data.data
+              : [];
+            list = arr;
+          } catch {
+            const r2 = await axios.get(`${API_URL}/communes`, { headers, timeout: 15000 });
+            const arr2 = Array.isArray(r2.data)
+              ? r2.data
+              : Array.isArray(r2.data?.items)
+              ? r2.data.items
+              : Array.isArray(r2.data?.data)
+              ? r2.data.data
+              : [];
+            list = arr2;
+          }
 
-          const normalized = (arr || [])
+          const normalized = (list || [])
             .map((c) => ({
               id: String(c.id ?? c._id ?? c.slug ?? c.code ?? "").trim(),
               name: String(c.name ?? c.label ?? c.communeName ?? "Commune").trim(),
@@ -216,7 +195,7 @@ const IncidentPage = () => {
     }
   }, [loadingMe, me, selectedCommuneId]);
 
-  // Init audio + déverrouillage autoplay
+  /* --------- Audio unlock --------- */
   useEffect(() => {
     audioRef.current = new Audio(SOUND_URL);
     audioRef.current.preload = "auto";
@@ -268,11 +247,7 @@ const IncidentPage = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (!isAudioAllowedRef.current) {
-      pendingPlayRef.current = true;
-      return;
-    }
-    if (document.visibilityState !== "visible") {
+    if (!isAudioAllowedRef.current || document.visibilityState !== "visible") {
       pendingPlayRef.current = true;
       return;
     }
@@ -285,6 +260,7 @@ const IncidentPage = () => {
     }
   };
 
+  /* --------- Récupération incidents --------- */
   const fetchIncidents = useCallback(async () => {
     if (loadingMe) return;
     try {
@@ -293,29 +269,39 @@ const IncidentPage = () => {
         period: periodFilter || undefined,
       });
 
-      const response =
-        (await multiTry("get", "incidents", { headers, params })) ||
-        (await multiTry("get", "incidents", { headers: {}, params }));
+      // IMPORTANT : route sous /api/incidents (INCIDENTS_PATH)
+      const response = await axios.get(`${API_URL}${INCIDENTS_PATH}`, {
+        headers,
+        params,
+        timeout: 20000,
+        validateStatus: () => true,
+      });
 
-      if (!response) {
-        setError("Impossible de charger les incidents.");
-        setLoading(false);
-        return;
-      }
-
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         localStorage.removeItem("token");
         window.location.href = "/login";
         return;
       }
+      if (response.status === 403) {
+        setError("Accès interdit sur cette ressource (vérifiez le filtre de commune).");
+        setIncidents([]);
+        setLoading(false);
+        return;
+      }
+      if (response.status !== 200 || !Array.isArray(response.data)) {
+        setError("Impossible de charger les incidents.");
+        setIncidents([]);
+        setLoading(false);
+        return;
+      }
 
-      let data = Array.isArray(response.data) ? response.data : [];
-      data = data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      let data = response.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
+      // Détection de nouveaux incidents et son
       const newIds = data.map((it) => it?._id).filter(Boolean);
       let hasNew = false;
       for (const id of newIds) {
@@ -342,24 +328,30 @@ const IncidentPage = () => {
 
   useEffect(() => {
     fetchIncidents();
-    const interval = setInterval(fetchIncidents, 5000);
+    const interval = setInterval(fetchIncidents, 10000);
     return () => clearInterval(interval);
   }, [fetchIncidents]);
 
+  /* --------- Actions --------- */
   const handleDelete = async (id) => {
     if (!window.confirm("Supprimer cet incident ?")) return;
     try {
       const headers = buildHeaders(me, selectedCommuneId);
       const params = buildParams(me, selectedCommuneId);
+      const res = await axios.delete(`${API_URL}${INCIDENTS_PATH}/${id}`, {
+        headers,
+        params,
+        timeout: 15000,
+        validateStatus: () => true,
+      });
 
-      const res =
-        (await multiTry("delete", `incidents/${id}`, { headers, params, timeout: 15000 })) ||
-        (await multiTry("delete", `incidents/${id}`, { headers: {}, params, timeout: 15000 }));
-
-      if (!res) throw new Error("Endpoint indisponible");
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         localStorage.removeItem("token");
         window.location.href = "/login";
+        return;
+      }
+      if (res.status === 403) {
+        alert("Accès interdit (filtre de commune invalide ?)");
         return;
       }
       if (res.status < 200 || res.status >= 300) {
@@ -392,25 +384,20 @@ const IncidentPage = () => {
     try {
       const headers = { ...buildHeaders(me, selectedCommuneId), "Content-Type": "application/json" };
       const params = buildParams(me, selectedCommuneId);
+      const res = await axios.put(`${API_URL}${INCIDENTS_PATH}/${editIncidentId}`, editedIncident, {
+        headers,
+        params,
+        timeout: 20000,
+        validateStatus: () => true,
+      });
 
-      const res =
-        (await multiTry("put", `incidents/${editIncidentId}`, {
-          headers,
-          params,
-          data: editedIncident,
-          timeout: 20000,
-        })) ||
-        (await multiTry("put", `incidents/${editIncidentId}`, {
-          headers: {},
-          params,
-          data: editedIncident,
-          timeout: 20000,
-        }));
-
-      if (!res) throw new Error("Endpoint indisponible");
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         localStorage.removeItem("token");
         window.location.href = "/login";
+        return;
+      }
+      if (res.status === 403) {
+        alert("Accès interdit (filtre de commune invalide ?)");
         return;
       }
       if (res.status < 200 || res.status >= 300) {
@@ -425,31 +412,24 @@ const IncidentPage = () => {
     }
   };
 
+  /* --------- Persistance filtre superadmin (optionnel) --------- */
   useEffect(() => {
     if (me?.role === "superadmin") {
+      // on persiste pour confort, mais on NE L’APPLIQUE PAS par défaut au premier rendu
       if (selectedCommuneId) {
-        localStorage.setItem("selectedCommuneId", lc(selectedCommuneId));
+        localStorage.setItem("selectedCommuneId", selectedCommuneId);
       } else {
         localStorage.removeItem("selectedCommuneId");
       }
     }
   }, [me?.role, selectedCommuneId]);
 
+  /* --------- Rendus --------- */
   if (loading || loadingMe) return <div className="p-6">Chargement...</div>;
   if (error) return <div className="p-6 text-red-500">{error}</div>;
 
-  // Bandeau si admin sans commune (rappelle le problème réel côté compte)
-  const adminNoCommune = me?.role === "admin" && !lc(me?.communeId || selectedCommuneId);
-
   return (
     <div className="pt-[80px] px-6 pb-6">
-      {adminNoCommune && (
-        <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
-          Votre compte administrateur n’est rattaché à aucune commune. Demandez à un superadmin de
-          vous assigner une commune. (Sinon, définissez « selectedCommuneId »).
-        </div>
-      )}
-
       <h1 className="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
         🛠️ Incidents signalés
       </h1>
@@ -482,7 +462,11 @@ const IncidentPage = () => {
           <select
             className="input"
             value={selectedCommuneId}
-            onChange={(e) => setSelectedCommuneId(e.target.value)}
+            onChange={(e) => {
+              setSelectedCommuneId(e.target.value);
+              // rafraîchir immédiatement quand on change de commune
+              setTimeout(fetchIncidents, 0);
+            }}
             title="Filtrer par commune (laisser vide pour toutes)"
           >
             <option value="">Toutes les communes</option>
@@ -501,6 +485,9 @@ const IncidentPage = () => {
           🔄 Rafraîchir
         </button>
       </div>
+
+      {/* Carte globale (optionnelle) */}
+      {/* <GlobalIncidentMap incidents={incidents} /> */}
 
       {incidents.length === 0 ? (
         <p className="text-gray-500">Aucun incident pour le moment.</p>
@@ -575,7 +562,7 @@ const IncidentPage = () => {
                   {incident.latitude && incident.longitude && (
                     <>
                       <p className="text-sm text-gray-600 mb-2">
-                        🛱️ {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
+                        🛱️ {Number(incident.latitude).toFixed(5)}, {Number(incident.longitude).toFixed(5)}
                       </p>
                       <IncidentMap latitude={incident.latitude} longitude={incident.longitude} />
                     </>

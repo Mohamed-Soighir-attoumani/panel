@@ -11,9 +11,8 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-// --- Helpers -------------------------------------------------
+// -------- Helpers ---------------------------------------------------------
 
-// Normalise les libellés de type
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
   const s = String(raw).trim();
@@ -22,7 +21,6 @@ function canonicalizeLabel(raw) {
   return { key, label };
 }
 
-// En-têtes pour filtrer par commune côté backend
 function buildHeaders(me) {
   const headers = {};
   if (me?.role === "admin" && me?.communeId) {
@@ -36,7 +34,6 @@ function buildHeaders(me) {
   return headers;
 }
 
-// Lecture cache /me
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -46,34 +43,49 @@ function readCachedMe() {
   }
 }
 
-// -------------------------------------------------------------
+// GET /me avec fallback (/api/me -> /me), sans casser l’UI si 404
+async function tolerantGetMe() {
+  // 1) essayer /api/me
+  try {
+    const r1 = await api.get("/api/me", { validateStatus: () => true, timeout: 15000 });
+    if (r1.status === 200 || r1.status === 401 || r1.status === 403) return r1;
+  } catch (_) {}
+  // 2) fallback /me
+  try {
+    const r2 = await api.get("/me", { validateStatus: () => true, timeout: 15000 });
+    return r2;
+  } catch (e) {
+    // renvoyer une réponse simulée pour que l'appelant ne crashe pas
+    return { status: 0, data: null };
+  }
+}
+
+// --------------------------------------------------------------------------
 
 const DashboardPage = () => {
-  // me depuis cache pour rendre instantanément
   const cachedMe = readCachedMe();
   const [me, setMe] = useState(cachedMe);
   const [loadingMe, setLoadingMe] = useState(!cachedMe);
 
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [period, setPeriod] = useState("7"); // "7" | "30" | "all"
+  const [period, setPeriod] = useState("7");
   const [activity, setActivity] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
 
   const [bannerError, setBannerError] = useState("");
 
-  // Garde "latest-only" pour éviter d'écraser l'état par une réponse plus lente
+  // “latest only”
   const lastFetchIdRef = useRef(0);
   const lastDevicesFetchIdRef = useRef(0);
 
-  // Revalidation de /me (avec /api explicite)
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
-        if (cancelled) return;
+      const res = await tolerantGetMe();
+      if (cancelled) return;
 
+      try {
         if (res.status === 200) {
           const user = res?.data?.user || res?.data || null;
           if (user) {
@@ -81,50 +93,56 @@ const DashboardPage = () => {
             localStorage.setItem("me", JSON.stringify(user));
             setBannerError("");
           } else {
-            throw new Error("Réponse /me inattendue");
+            setBannerError("Réponse /me inattendue.");
           }
-        } else if (res.status === 401 || res.status === 403) {
+        } else if (res.status === 401) {
+          // seulement 401 => session invalide
           localStorage.removeItem("token");
           localStorage.removeItem("token_orig");
           localStorage.removeItem("me");
           window.location.href = "/login";
           return;
+        } else if (res.status === 403) {
+          // 403 ≠ déconnexion : souvent manque x-commune-id → on reste connecté
+          setBannerError("Accès restreint : vérifiez le filtre de commune.");
+        } else if (res.status === 0) {
+          setBannerError("Erreur réseau/CORS lors de la vérification de session.");
         } else {
-          // on garde me du cache si dispo
+          // 404 etc. : ne pas éjecter, on garde l’écran et le cache si présent
           setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
         }
-      } catch (_e) {
-        if (!cachedMe) {
-          setBannerError("Erreur réseau/CORS lors de la vérification de session.");
-        }
       } finally {
-        if (!cancelled) setLoadingMe(false);
+        setLoadingMe(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
-    if (status === 401 || status === 403) {
+    if (status === 401) {
+      // ✅ ne rediriger que sur 401 (token invalide/expiré)
       localStorage.removeItem("token");
       localStorage.removeItem("token_orig");
       localStorage.removeItem("me");
       window.location.href = "/login";
       return true;
     }
+    // 403 → ne pas “déconnecter”, juste signaler
+    if (status === 403) {
+      setBannerError("Accès interdit sur cette ressource (vérifiez le filtre de commune).");
+      return false;
+    }
     return false;
   }, []);
 
-  // -------- Fetch incidents & notifications (stale-while-revalidate + latest-only)
   const fetchData = useCallback(async () => {
     if (!me) return;
+
     const headers = buildHeaders(me);
     const qs = period === "all" ? "" : `?period=${period}`;
-
     const fetchId = ++lastFetchIdRef.current;
 
     let incOk = false;
@@ -132,57 +150,51 @@ const DashboardPage = () => {
     let nextIncidents = null;
     let nextNotifications = null;
 
-    // Incidents
     try {
       const incidentRes = await api.get(`/api/incidents${qs}`, {
         headers,
         validateStatus: () => true,
       });
       if (fetchId !== lastFetchIdRef.current) return;
+
       if (incidentRes.status === 200) {
         const d = incidentRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
         nextIncidents = arr;
         incOk = true;
       } else if (incidentRes.status === 404) {
-        // endpoint manquant → on n'écrase pas l'état existant
-      } else if (!handleAuthError({ response: { status: incidentRes.status } })) {
-        // autre erreur → on garde l'ancien état
+        // endpoint absent → ne pas écraser l’état
+      } else {
+        handleAuthError({ response: { status: incidentRes.status } });
       }
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // réseau → garder l'ancien état
-      }
+      handleAuthError(err);
     }
 
-    // Notifications
     try {
       const notifRes = await api.get(`/api/notifications`, {
         headers,
         validateStatus: () => true,
       });
       if (fetchId !== lastFetchIdRef.current) return;
+
       if (notifRes.status === 200) {
         const d = notifRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
         nextNotifications = arr;
         notifOk = true;
       } else if (notifRes.status === 404) {
-        // endpoint manquant → ne rien écraser
-      } else if (!handleAuthError({ response: { status: notifRes.status } })) {
-        // autre erreur → ne rien écraser
+        // endpoint absent → ne pas écraser
+      } else {
+        handleAuthError({ response: { status: notifRes.status } });
       }
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // réseau → ne rien écraser
-      }
+      handleAuthError(err);
     }
 
-    // Appliquer les nouveaux états UNIQUEMENT si succès
     if (incOk) setIncidents(nextIncidents);
     if (notifOk) setNotifications(nextNotifications);
 
-    // Bannière si tout a échoué
     if (!incOk && !notifOk) {
       setBannerError("Erreur lors du chargement des données.");
     } else {
@@ -190,39 +202,33 @@ const DashboardPage = () => {
     }
   }, [handleAuthError, me, period]);
 
-  // -------- Fetch deviceCount (compatible admin/superadmin + filtres de commune)
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
 
     const headers = buildHeaders(me);
-    // Clef commune la plus fiable (header + query)
     const communeKey =
       (headers["x-commune-id"] && String(headers["x-commune-id"]).trim().toLowerCase()) || "";
 
     const fetchId = ++lastDevicesFetchIdRef.current;
 
     try {
-      // 1) endpoint moderne, avec filtre explicite communeId (utile côté admin)
-      const urlCount = `/api/devices/count?activeDays=30${communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""}`;
-      const res = await api.get(urlCount, {
-        headers,
-        validateStatus: () => true,
-      });
+      // passer header + query pour maximiser les chances côté backend
+      const urlCount = `/api/devices/count?activeDays=30${
+        communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""
+      }`;
+      const res = await api.get(urlCount, { headers, validateStatus: () => true });
       if (fetchId !== lastDevicesFetchIdRef.current) return;
 
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
-        setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
         return;
       }
 
-      // 2) Fallback si /count indispo → lire le total paginé avec le même filtre
       if (res.status === 404 || res.status === 400) {
-        const urlList = `/api/devices?page=1&pageSize=1${communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""}`;
-        const fallback = await api.get(urlList, {
-          headers,
-          validateStatus: () => true,
-        });
+        const urlList = `/api/devices?page=1&pageSize=1${
+          communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""
+        }`;
+        const fallback = await api.get(urlList, { headers, validateStatus: () => true });
         if (fetchId !== lastDevicesFetchIdRef.current) return;
 
         if (fallback.status === 200) {
@@ -233,22 +239,16 @@ const DashboardPage = () => {
               ? fallback.data.length
               : 0;
           setDeviceCount(total);
-          setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
           return;
         }
       }
 
-      if (!handleAuthError({ response: { status: res.status } })) {
-        // autre code → on garde l’ancienne valeur
-      }
+      handleAuthError({ response: { status: res.status } });
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // réseau → garder l’ancienne valeur
-      }
+      handleAuthError(err);
     }
   }, [handleAuthError, me]);
 
-  // Lancer les fetchs quand /me est connu
   useEffect(() => {
     if (!loadingMe && me) {
       fetchData();
@@ -261,32 +261,28 @@ const DashboardPage = () => {
     }
   }, [loadingMe, me, fetchData, fetchDeviceCount]);
 
-  // Dériver l’activité **à partir des états validés**
+  // Dérive l’activité sans déclencher des fetchs
   useEffect(() => {
-    try {
-      const next = [
-        ...incidents.slice(0, 3).map((inc) => {
-          const t = inc?.type || inc?.title || "Inconnu";
-          return {
-            type: "incident",
-            text: `Incident "${t}" signalé`,
-            time: inc?.createdAt
-              ? new Date(inc.createdAt).toLocaleString("fr-FR")
-              : "Date inconnue",
-          };
-        }),
-        ...notifications.slice(0, 3).map((notif) => ({
-          type: "notification",
-          text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
-          time: notif?.createdAt
-            ? new Date(notif.createdAt).toLocaleString("fr-FR")
+    const next = [
+      ...incidents.slice(0, 3).map((inc) => {
+        const t = inc?.type || inc?.title || "Inconnu";
+        return {
+          type: "incident",
+          text: `Incident "${t}" signalé`,
+          time: inc?.createdAt
+            ? new Date(inc.createdAt).toLocaleString("fr-FR")
             : "Date inconnue",
-        })),
-      ];
-      setActivity(next);
-    } catch {
-      setActivity([]);
-    }
+        };
+      }),
+      ...notifications.slice(0, 3).map((notif) => ({
+        type: "notification",
+        text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
+        time: notif?.createdAt
+          ? new Date(notif.createdAt).toLocaleString("fr-FR")
+          : "Date inconnue",
+      })),
+    ];
+    setActivity(next);
   }, [incidents, notifications]);
 
   // ==== Répartition par types
@@ -381,16 +377,21 @@ const DashboardPage = () => {
     </li>
   );
 
-  // Premier chargement sans cache
   if (loadingMe && !me) {
     return <div className="p-6">Chargement…</div>;
   }
 
+  // Message utile si l’admin n’a pas de commune rattachée
+  const needsCommune =
+    me?.role === "admin" && (!me.communeId || String(me.communeId).trim() === "");
+
   return (
     <div className="p-4 sm:p-6">
-      {bannerError && (
+      {(bannerError || needsCommune) && (
         <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3">
-          {bannerError}
+          {needsCommune
+            ? "Votre compte administrateur n’est rattaché à aucune commune. Demandez à un superadmin de vous assigner une commune."
+            : bannerError}
         </div>
       )}
 
@@ -411,7 +412,6 @@ const DashboardPage = () => {
             <option value="all">Tous</option>
           </select>
 
-          {/* Sélecteur commune pour superadmin */}
           {me?.role === "superadmin" && (
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
@@ -421,7 +421,6 @@ const DashboardPage = () => {
                 const v = e.target.value.trim().toLowerCase();
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
-                // rechargements ciblés
                 fetchData();
                 fetchDeviceCount();
               }}
@@ -440,7 +439,6 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
         <KpiCard
           icon="🚨"
@@ -459,10 +457,8 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      {/* 📈 Courbe du fil de temps */}
       <IncidentsChart incidents={incidents} period={period} />
 
-      {/* 🧭 Répartition par types */}
       <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
         <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
         {typeLabels.length === 0 ? (
@@ -472,12 +468,10 @@ const DashboardPage = () => {
         )}
       </div>
 
-      {/* Table des devices */}
       <div className="mt-6">
         <DevicesTable />
       </div>
 
-      {/* Activité récente */}
       <div className="bg-white p-4 shadow rounded mt-6">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { Chart as ChartJS, registerables } from "chart.js";
 import ChartDataLabels from "chartjs-plugin-datalabels";
@@ -11,6 +11,8 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
+// --- Helpers -------------------------------------------------
+
 // Normalise les libellés de type
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
@@ -20,20 +22,21 @@ function canonicalizeLabel(raw) {
   return { key, label };
 }
 
+// En-têtes pour filtrer par commune côté backend
 function buildHeaders(me) {
   const headers = {};
   if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = me.communeId;
+    headers["x-commune-id"] = String(me.communeId).trim().toLowerCase();
   }
   if (me?.role === "superadmin") {
     const selectedCid =
       (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
-    if (selectedCid) headers["x-commune-id"] = selectedCid;
+    if (selectedCid) headers["x-commune-id"] = String(selectedCid).trim().toLowerCase();
   }
   return headers;
 }
 
-// 🔥 Lecture instantanée du cache utilisateur
+// Lecture cache /me
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -43,11 +46,13 @@ function readCachedMe() {
   }
 }
 
+// -------------------------------------------------------------
+
 const DashboardPage = () => {
-  // 👉 me est immédiatement rempli si présent en cache (donc rendu instantané)
-  const cached = readCachedMe();
-  const [me, setMe] = useState(cached);
-  const [loadingMe, setLoadingMe] = useState(!cached);
+  // me depuis cache pour rendre instantanément
+  const cachedMe = readCachedMe();
+  const [me, setMe] = useState(cachedMe);
+  const [loadingMe, setLoadingMe] = useState(!cachedMe);
 
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -57,12 +62,16 @@ const DashboardPage = () => {
 
   const [bannerError, setBannerError] = useState("");
 
-  // Revalidation silencieuse de /me en arrière-plan
+  // Garde "latest-only" pour éviter d'écraser l'état par une réponse plus lente
+  const lastFetchIdRef = useRef(0);
+  const lastDevicesFetchIdRef = useRef(0);
+
+  // Revalidation de /me (avec /api explicite)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.get("me", { timeout: 15000, validateStatus: () => true });
+        const res = await api.get("/api/me", { timeout: 15000, validateStatus: () => true });
         if (cancelled) return;
 
         if (res.status === 200) {
@@ -81,12 +90,11 @@ const DashboardPage = () => {
           window.location.href = "/login";
           return;
         } else {
-          // on garde me du cache si dispo, on signale juste l’erreur
+          // on garde me du cache si dispo
           setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
         }
-      } catch (e) {
-        // pas de redirection si on a déjà me en cache
-        if (!cached) {
+      } catch (_e) {
+        if (!cachedMe) {
           setBannerError("Erreur réseau/CORS lors de la vérification de session.");
         }
       } finally {
@@ -97,7 +105,7 @@ const DashboardPage = () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // une seule fois au montage
+  }, []);
 
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
@@ -111,93 +119,96 @@ const DashboardPage = () => {
     return false;
   }, []);
 
+  // -------- Fetch incidents & notifications (stale-while-revalidate + latest-only)
   const fetchData = useCallback(async () => {
-    if (!me) return; // on a besoin de me (cache ou réseau)
+    if (!me) return;
     const headers = buildHeaders(me);
     const qs = period === "all" ? "" : `?period=${period}`;
 
+    const fetchId = ++lastFetchIdRef.current;
+
     let incOk = false;
     let notifOk = false;
+    let nextIncidents = null;
+    let nextNotifications = null;
 
+    // Incidents
     try {
-      const incidentRes = await api.get(`incidents${qs}`, {
+      const incidentRes = await api.get(`/api/incidents${qs}`, {
         headers,
         validateStatus: () => true,
       });
+      if (fetchId !== lastFetchIdRef.current) return;
       if (incidentRes.status === 200) {
         const d = incidentRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setIncidents(arr);
+        nextIncidents = arr;
         incOk = true;
       } else if (incidentRes.status === 404) {
-        setIncidents([]);
-        incOk = true;
+        // endpoint manquant → on n'écrase pas l'état existant
       } else if (!handleAuthError({ response: { status: incidentRes.status } })) {
-        setIncidents([]);
+        // autre erreur → on garde l'ancien état
       }
     } catch (err) {
-      if (!handleAuthError(err)) setIncidents([]);
+      if (!handleAuthError(err)) {
+        // réseau → garder l'ancien état
+      }
     }
 
+    // Notifications
     try {
-      const notifRes = await api.get(`notifications`, {
+      const notifRes = await api.get(`/api/notifications`, {
         headers,
         validateStatus: () => true,
       });
+      if (fetchId !== lastFetchIdRef.current) return;
       if (notifRes.status === 200) {
         const d = notifRes.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setNotifications(arr);
+        nextNotifications = arr;
         notifOk = true;
       } else if (notifRes.status === 404) {
-        setNotifications([]);
-        notifOk = true;
+        // endpoint manquant → ne rien écraser
       } else if (!handleAuthError({ response: { status: notifRes.status } })) {
-        setNotifications([]);
+        // autre erreur → ne rien écraser
       }
     } catch (err) {
-      if (!handleAuthError(err)) setNotifications([]);
+      if (!handleAuthError(err)) {
+        // réseau → ne rien écraser
+      }
     }
 
-    try {
-      const nextActivity = [
-        ...(incOk ? incidents : []).slice(0, 3).map((inc) => {
-          const t = inc?.type || inc?.title || "Inconnu";
-          return {
-            type: "incident",
-            text: `Incident "${t}" signalé`,
-            time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
-          };
-        }),
-        ...(notifOk ? notifications : []).slice(0, 3).map((notif) => ({
-          type: "notification",
-          text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
-          time: notif?.createdAt ? new Date(notif.createdAt).toLocaleString("fr-FR") : "Date inconnue",
-        })),
-      ];
-      setActivity(nextActivity);
-    } catch {
-      setActivity([]);
-    }
+    // Appliquer les nouveaux états UNIQUEMENT si succès
+    if (incOk) setIncidents(nextIncidents);
+    if (notifOk) setNotifications(nextNotifications);
 
+    // Bannière si tout a échoué
     if (!incOk && !notifOk) {
       setBannerError("Erreur lors du chargement des données.");
     } else {
-      setBannerError((prev) =>
-        prev && prev.includes("chargement des données") ? "" : prev
-      );
+      setBannerError((prev) => (prev?.includes("chargement des données") ? "" : prev));
     }
-  }, [handleAuthError, me, period, incidents, notifications]);
+  }, [handleAuthError, me, period]);
 
+  // -------- Fetch deviceCount (compatible admin/superadmin + filtres de commune)
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
-    try {
-      const headers = buildHeaders(me);
 
-      const res = await api.get(`devices/count?activeDays=30`, {
+    const headers = buildHeaders(me);
+    // Clef commune la plus fiable (header + query)
+    const communeKey =
+      (headers["x-commune-id"] && String(headers["x-commune-id"]).trim().toLowerCase()) || "";
+
+    const fetchId = ++lastDevicesFetchIdRef.current;
+
+    try {
+      // 1) endpoint moderne, avec filtre explicite communeId (utile côté admin)
+      const urlCount = `/api/devices/count?activeDays=30${communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""}`;
+      const res = await api.get(urlCount, {
         headers,
         validateStatus: () => true,
       });
+      if (fetchId !== lastDevicesFetchIdRef.current) return;
 
       if (res.status === 200 && res.data && typeof res.data.count === "number") {
         setDeviceCount(res.data.count);
@@ -205,29 +216,39 @@ const DashboardPage = () => {
         return;
       }
 
-      if (res.status === 404) {
-        const fallback = await api.get(`devices?page=1&pageSize=1`, {
+      // 2) Fallback si /count indispo → lire le total paginé avec le même filtre
+      if (res.status === 404 || res.status === 400) {
+        const urlList = `/api/devices?page=1&pageSize=1${communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""}`;
+        const fallback = await api.get(urlList, {
           headers,
           validateStatus: () => true,
         });
-        if (fallback.status === 200 && typeof fallback.data?.total === "number") {
-          setDeviceCount(fallback.data.total);
+        if (fetchId !== lastDevicesFetchIdRef.current) return;
+
+        if (fallback.status === 200) {
+          const total =
+            typeof fallback.data?.total === "number"
+              ? fallback.data.total
+              : Array.isArray(fallback.data)
+              ? fallback.data.length
+              : 0;
+          setDeviceCount(total);
           setBannerError((prev) => (prev?.includes("utilisateurs") ? "" : prev));
           return;
         }
       }
 
       if (!handleAuthError({ response: { status: res.status } })) {
-        // silencieux
+        // autre code → on garde l’ancienne valeur
       }
     } catch (err) {
       if (!handleAuthError(err)) {
-        // silencieux
+        // réseau → garder l’ancienne valeur
       }
     }
   }, [handleAuthError, me]);
 
-  // ⚡ Si on a me en cache, on peut lancer tout de suite les fetchs (pas d’attente)
+  // Lancer les fetchs quand /me est connu
   useEffect(() => {
     if (!loadingMe && me) {
       fetchData();
@@ -239,6 +260,34 @@ const DashboardPage = () => {
       return () => clearInterval(interval);
     }
   }, [loadingMe, me, fetchData, fetchDeviceCount]);
+
+  // Dériver l’activité **à partir des états validés**
+  useEffect(() => {
+    try {
+      const next = [
+        ...incidents.slice(0, 3).map((inc) => {
+          const t = inc?.type || inc?.title || "Inconnu";
+          return {
+            type: "incident",
+            text: `Incident "${t}" signalé`,
+            time: inc?.createdAt
+              ? new Date(inc.createdAt).toLocaleString("fr-FR")
+              : "Date inconnue",
+          };
+        }),
+        ...notifications.slice(0, 3).map((notif) => ({
+          type: "notification",
+          text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
+          time: notif?.createdAt
+            ? new Date(notif.createdAt).toLocaleString("fr-FR")
+            : "Date inconnue",
+        })),
+      ];
+      setActivity(next);
+    } catch {
+      setActivity([]);
+    }
+  }, [incidents, notifications]);
 
   // ==== Répartition par types
   const { typeLabels, typeCounts } = useMemo(() => {
@@ -332,8 +381,7 @@ const DashboardPage = () => {
     </li>
   );
 
-  // 💡 On n’affiche plus d’écran “Chargement…” si on a un cache.
-  //    Au pire (premier chargement sans cache), on garde l’ancien fallback.
+  // Premier chargement sans cache
   if (loadingMe && !me) {
     return <div className="p-6">Chargement…</div>;
   }
@@ -370,9 +418,10 @@ const DashboardPage = () => {
               className="border px-2 py-1 rounded w-full sm:w-64"
               defaultValue={localStorage.getItem("selectedCommuneId") || ""}
               onBlur={(e) => {
-                const v = e.target.value.trim();
+                const v = e.target.value.trim().toLowerCase();
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
+                // rechargements ciblés
                 fetchData();
                 fetchDeviceCount();
               }}

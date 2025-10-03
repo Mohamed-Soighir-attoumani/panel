@@ -11,7 +11,7 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-// -------- Helpers ---------------------------------------------------------
+// ---------- Helpers --------------------------------------------------------
 
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
@@ -19,19 +19,6 @@ function canonicalizeLabel(raw) {
   const key = s.toLowerCase();
   const label = s.charAt(0).toUpperCase() + s.slice(1);
   return { key, label };
-}
-
-function buildHeaders(me) {
-  const headers = {};
-  if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = String(me.communeId).trim().toLowerCase();
-  }
-  if (me?.role === "superadmin") {
-    const selectedCid =
-      (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
-    if (selectedCid) headers["x-commune-id"] = String(selectedCid).trim().toLowerCase();
-  }
-  return headers;
 }
 
 function readCachedMe() {
@@ -43,21 +30,54 @@ function readCachedMe() {
   }
 }
 
-// GET /me avec fallback (/api/me -> /me), sans casser l’UI si 404
+// Commune “courante”
+function selectedCommuneFor(me) {
+  if (me?.role === "admin") {
+    return (me.communeId || "").toString().trim().toLowerCase();
+  }
+  if (me?.role === "superadmin") {
+    const v = (localStorage.getItem("selectedCommuneId") || "").toString().trim().toLowerCase();
+    return v;
+  }
+  return "";
+}
+
+// Headers à envoyer
+function buildHeaders(me) {
+  const cid = selectedCommuneFor(me);
+  const headers = {};
+  if (cid) headers["x-commune-id"] = cid;
+  return headers;
+}
+
+// GET /me avec fallback (/api/me -> /me)
 async function tolerantGetMe() {
-  // 1) essayer /api/me
   try {
     const r1 = await api.get("/api/me", { validateStatus: () => true, timeout: 15000 });
     if (r1.status === 200 || r1.status === 401 || r1.status === 403) return r1;
   } catch (_) {}
-  // 2) fallback /me
   try {
     const r2 = await api.get("/me", { validateStatus: () => true, timeout: 15000 });
     return r2;
-  } catch (e) {
-    // renvoyer une réponse simulée pour que l'appelant ne crashe pas
+  } catch {
     return { status: 0, data: null };
   }
+}
+
+// Essaie plusieurs chemins + les 2 variantes commune (header+query)
+async function multiTryGet(basePaths, { headers, query = "" }) {
+  // assure qu'on a bien ?... ou &... correct
+  const q = query ? (basePaths[0]?.includes("?") ? `&${query}` : `?${query}`) : "";
+  for (const p of basePaths) {
+    try {
+      const res = await api.get(`${p}${q}`, { headers, validateStatus: () => true });
+      if (res.status === 200) return res;
+      // si 401/403/404 on tente le prochain chemin
+    } catch (_) {
+      // on tente le prochain chemin
+    }
+  }
+  return null;
 }
 
 // --------------------------------------------------------------------------
@@ -69,16 +89,16 @@ const DashboardPage = () => {
 
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
-  const [period, setPeriod] = useState("7");
-  const [activity, setActivity] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
-
+  const [activity, setActivity] = useState([]);
+  const [period, setPeriod] = useState("7");
   const [bannerError, setBannerError] = useState("");
 
-  // “latest only”
+  // Evite d’écraser l’état par des réponses lentes
   const lastFetchIdRef = useRef(0);
   const lastDevicesFetchIdRef = useRef(0);
 
+  // Charge /me (avec cache)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -96,204 +116,176 @@ const DashboardPage = () => {
             setBannerError("Réponse /me inattendue.");
           }
         } else if (res.status === 401) {
-          // seulement 401 => session invalide
           localStorage.removeItem("token");
           localStorage.removeItem("token_orig");
           localStorage.removeItem("me");
           window.location.href = "/login";
           return;
         } else if (res.status === 403) {
-          // 403 ≠ déconnexion : souvent manque x-commune-id → on reste connecté
           setBannerError("Accès restreint : vérifiez le filtre de commune.");
         } else if (res.status === 0) {
           setBannerError("Erreur réseau/CORS lors de la vérification de session.");
         } else {
-          // 404 etc. : ne pas éjecter, on garde l’écran et le cache si présent
           setBannerError(`Impossible de vérifier la session (HTTP ${res.status}).`);
         }
       } finally {
         setLoadingMe(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
+  // Ne déconnecte que sur 401
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
     if (status === 401) {
-      // ✅ ne rediriger que sur 401 (token invalide/expiré)
       localStorage.removeItem("token");
       localStorage.removeItem("token_orig");
       localStorage.removeItem("me");
       window.location.href = "/login";
       return true;
     }
-    // 403 → ne pas “déconnecter”, juste signaler
-    if (status === 403) {
-      setBannerError("Accès interdit sur cette ressource (vérifiez le filtre de commune).");
-      return false;
-    }
     return false;
   }, []);
 
+  // Fait les requêtes incidents/notifications
   const fetchData = useCallback(async () => {
     if (!me) return;
 
+    const cid = selectedCommuneFor(me);
     const headers = buildHeaders(me);
-    const qs = period === "all" ? "" : `?period=${period}`;
+    const qs = period === "all" ? "" : `period=${period}`;
+    const communeQuery = cid ? (qs ? `${qs}&communeId=${encodeURIComponent(cid)}` : `communeId=${encodeURIComponent(cid)}`) : qs;
+
     const fetchId = ++lastFetchIdRef.current;
 
-    let incOk = false;
-    let notifOk = false;
-    let nextIncidents = null;
-    let nextNotifications = null;
-
+    // --- incidents ---
     try {
-      const incidentRes = await api.get(`/api/incidents${qs}`, {
-        headers,
-        validateStatus: () => true,
-      });
+      const incidentsRes =
+        (await multiTryGet(["incidents", "/api/incidents"], { headers, query: communeQuery })) ||
+        (await multiTryGet(["incidents", "/api/incidents"], { headers: {}, query: communeQuery })) || // fallback sans header
+        null;
+
       if (fetchId !== lastFetchIdRef.current) return;
 
-      if (incidentRes.status === 200) {
-        const d = incidentRes.data;
-        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        nextIncidents = arr;
-        incOk = true;
-      } else if (incidentRes.status === 404) {
-        // endpoint absent → ne pas écraser l’état
-      } else {
-        handleAuthError({ response: { status: incidentRes.status } });
+      if (incidentsRes && incidentsRes.status === 200) {
+        const d = incidentsRes.data;
+        const arr = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : []);
+        setIncidents(arr);
       }
     } catch (err) {
-      handleAuthError(err);
+      if (!handleAuthError(err)) {
+        // ne pas écraser l’état existant
+      }
     }
 
+    // --- notifications ---
     try {
-      const notifRes = await api.get(`/api/notifications`, {
-        headers,
-        validateStatus: () => true,
-      });
+      const notifsRes =
+        (await multiTryGet(["notifications", "/api/notifications"], { headers, query: communeQuery })) ||
+        (await multiTryGet(["notifications", "/api/notifications"], { headers: {}, query: communeQuery })) ||
+        null;
+
       if (fetchId !== lastFetchIdRef.current) return;
 
-      if (notifRes.status === 200) {
-        const d = notifRes.data;
-        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        nextNotifications = arr;
-        notifOk = true;
-      } else if (notifRes.status === 404) {
-        // endpoint absent → ne pas écraser
-      } else {
-        handleAuthError({ response: { status: notifRes.status } });
+      if (notifsRes && notifsRes.status === 200) {
+        const d = notifsRes.data;
+        const arr = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : []);
+        setNotifications(arr);
       }
     } catch (err) {
-      handleAuthError(err);
+      if (!handleAuthError(err)) {
+        // silencieux
+      }
     }
+  }, [me, period, handleAuthError]);
 
-    if (incOk) setIncidents(nextIncidents);
-    if (notifOk) setNotifications(nextNotifications);
-
-    if (!incOk && !notifOk) {
-      setBannerError("Erreur lors du chargement des données.");
-    } else {
-      setBannerError((prev) => (prev?.includes("chargement des données") ? "" : prev));
-    }
-  }, [handleAuthError, me, period]);
-
+  // Compteur d’utilisateurs (devices)
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
 
+    const cid = selectedCommuneFor(me);
     const headers = buildHeaders(me);
-    const communeKey =
-      (headers["x-commune-id"] && String(headers["x-commune-id"]).trim().toLowerCase()) || "";
-
+    const baseQuery = `activeDays=30${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
     const fetchId = ++lastDevicesFetchIdRef.current;
 
     try {
-      // passer header + query pour maximiser les chances côté backend
-      const urlCount = `/api/devices/count?activeDays=30${
-        communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""
-      }`;
-      const res = await api.get(urlCount, { headers, validateStatus: () => true });
+      const countRes =
+        (await multiTryGet(["devices/count", "/api/devices/count"], { headers, query: baseQuery })) ||
+        (await multiTryGet(["devices/count", "/api/devices/count"], { headers: {}, query: baseQuery })) ||
+        null;
+
       if (fetchId !== lastDevicesFetchIdRef.current) return;
 
-      if (res.status === 200 && res.data && typeof res.data.count === "number") {
-        setDeviceCount(res.data.count);
+      if (countRes && countRes.status === 200 && typeof countRes.data?.count === "number") {
+        setDeviceCount(countRes.data.count);
         return;
       }
 
-      if (res.status === 404 || res.status === 400) {
-        const urlList = `/api/devices?page=1&pageSize=1${
-          communeKey ? `&communeId=${encodeURIComponent(communeKey)}` : ""
-        }`;
-        const fallback = await api.get(urlList, { headers, validateStatus: () => true });
-        if (fetchId !== lastDevicesFetchIdRef.current) return;
+      // Fallback à la liste paginée pour avoir total
+      const listQuery = `page=1&pageSize=1${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
+      const listRes =
+        (await multiTryGet(["devices", "/api/devices"], { headers, query: listQuery })) ||
+        (await multiTryGet(["devices", "/api/devices"], { headers: {}, query: listQuery })) ||
+        null;
 
-        if (fallback.status === 200) {
-          const total =
-            typeof fallback.data?.total === "number"
-              ? fallback.data.total
-              : Array.isArray(fallback.data)
-              ? fallback.data.length
-              : 0;
-          setDeviceCount(total);
-          return;
-        }
+      if (fetchId !== lastDevicesFetchIdRef.current) return;
+
+      if (listRes && listRes.status === 200) {
+        const total =
+          typeof listRes.data?.total === "number"
+            ? listRes.data.total
+            : Array.isArray(listRes.data)
+            ? listRes.data.length
+            : 0;
+        setDeviceCount(total);
       }
-
-      handleAuthError({ response: { status: res.status } });
     } catch (err) {
-      handleAuthError(err);
+      if (!handleAuthError(err)) {
+        // ne pas mettre 0 si réseau HS
+      }
     }
-  }, [handleAuthError, me]);
+  }, [me, handleAuthError]);
 
+  // bootstrap + polling
   useEffect(() => {
     if (!loadingMe && me) {
       fetchData();
       fetchDeviceCount();
-      const interval = setInterval(() => {
+      const i = setInterval(() => {
         fetchData();
         fetchDeviceCount();
       }, 30000);
-      return () => clearInterval(interval);
+      return () => clearInterval(i);
     }
   }, [loadingMe, me, fetchData, fetchDeviceCount]);
 
-  // Dérive l’activité sans déclencher des fetchs
+  // Activité récente (dérivée)
   useEffect(() => {
     const next = [
-      ...incidents.slice(0, 3).map((inc) => {
-        const t = inc?.type || inc?.title || "Inconnu";
-        return {
-          type: "incident",
-          text: `Incident "${t}" signalé`,
-          time: inc?.createdAt
-            ? new Date(inc.createdAt).toLocaleString("fr-FR")
-            : "Date inconnue",
-        };
-      }),
-      ...notifications.slice(0, 3).map((notif) => ({
+      ...incidents.slice(0, 3).map((inc) => ({
+        type: "incident",
+        text: `Incident "${inc?.type || inc?.title || "Inconnu"}" signalé`,
+        time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
+      })),
+      ...notifications.slice(0, 3).map((n) => ({
         type: "notification",
-        text: `Notification: ${notif?.title || notif?.message || "Sans titre"}`,
-        time: notif?.createdAt
-          ? new Date(notif.createdAt).toLocaleString("fr-FR")
-          : "Date inconnue",
+        text: `Notification: ${n?.title || n?.message || "Sans titre"}`,
+        time: n?.createdAt ? new Date(n.createdAt).toLocaleString("fr-FR") : "Date inconnue",
       })),
     ];
     setActivity(next);
   }, [incidents, notifications]);
 
-  // ==== Répartition par types
+  // ---- Répartition types
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
     for (const inc of incidents) {
       const raw = inc?.type || inc?.title || "Inconnu";
       const { key, label } = canonicalizeLabel(raw);
-      const entry = map.get(key) || { label, count: 0 };
-      entry.count += 1;
-      map.set(key, entry);
+      const e = map.get(key) || { label, count: 0 };
+      e.count += 1;
+      map.set(key, e);
     }
     const arr = Array.from(map.values()).sort((a, b) => b.count - a.count);
     return { typeLabels: arr.map((x) => x.label), typeCounts: arr.map((x) => x.count) };
@@ -304,10 +296,7 @@ const DashboardPage = () => {
     maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
-      tooltip: {
-        enabled: true,
-        callbacks: { label: (ctx) => nf.format(ctx.parsed.y ?? 0) },
-      },
+      tooltip: { enabled: true, callbacks: { label: (ctx) => nf.format(ctx.parsed.y ?? 0) } },
       datalabels: {
         anchor: "end",
         align: "top",
@@ -318,11 +307,7 @@ const DashboardPage = () => {
     },
     scales: {
       x: { ticks: { autoSkip: false, maxRotation: 40, minRotation: 0 } },
-      y: {
-        beginAtZero: true,
-        precision: 0,
-        ticks: { callback: (v) => nf.format(v) },
-      },
+      y: { beginAtZero: true, precision: 0, ticks: { callback: (v) => nf.format(v) } },
     },
   };
 
@@ -377,13 +362,10 @@ const DashboardPage = () => {
     </li>
   );
 
-  if (loadingMe && !me) {
-    return <div className="p-6">Chargement…</div>;
-  }
+  if (loadingMe && !me) return <div className="p-6">Chargement…</div>;
 
-  // Message utile si l’admin n’a pas de commune rattachée
-  const needsCommune =
-    me?.role === "admin" && (!me.communeId || String(me.communeId).trim() === "");
+  // Bandeau informatif si manque de commune pour l’admin
+  const needsCommune = me?.role === "admin" && !selectedCommuneFor(me);
 
   return (
     <div className="p-4 sm:p-6">
@@ -396,9 +378,7 @@ const DashboardPage = () => {
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">
-          📊 Tableau de bord
-        </h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">📊 Tableau de bord</h1>
 
         <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
           <label className="font-medium">📅 Période :</label>
@@ -416,7 +396,7 @@ const DashboardPage = () => {
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
               className="border px-2 py-1 rounded w-full sm:w-64"
-              defaultValue={localStorage.getItem("selectedCommuneId") || ""}
+              defaultValue={selectedCommuneFor(me) || ""}
               onBlur={(e) => {
                 const v = e.target.value.trim().toLowerCase();
                 if (v) localStorage.setItem("selectedCommuneId", v);
@@ -439,6 +419,7 @@ const DashboardPage = () => {
         </div>
       </div>
 
+      {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
         <KpiCard
           icon="🚨"
@@ -457,8 +438,10 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
+      {/* Courbe */}
       <IncidentsChart incidents={incidents} period={period} />
 
+      {/* Répartition par types */}
       <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
         <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
         {typeLabels.length === 0 ? (
@@ -468,10 +451,12 @@ const DashboardPage = () => {
         )}
       </div>
 
+      {/* Table devices */}
       <div className="mt-6">
         <DevicesTable />
       </div>
 
+      {/* Activité récente */}
       <div className="bg-white p-4 shadow rounded mt-6">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

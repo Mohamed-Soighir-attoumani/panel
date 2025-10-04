@@ -11,7 +11,7 @@ ChartJS.register(...registerables, ChartDataLabels);
 
 const nf = new Intl.NumberFormat("fr-FR");
 
-// ---------- Helpers --------------------------------------------------------
+// ---------- Utils ---------------------------------------------------------
 
 function canonicalizeLabel(raw) {
   if (!raw) return { key: "inconnu", label: "Inconnu" };
@@ -34,8 +34,8 @@ function readCachedMe() {
 async function tolerantGetMe() {
   try {
     const r1 = await api.get("/api/me", { validateStatus: () => true, timeout: 15000 });
-    if (r1.status === 200 || r1.status === 401 || r1.status === 403) return r1;
-  } catch (_) {}
+    if ([200, 401, 403].includes(r1.status)) return r1;
+  } catch {}
   try {
     const r2 = await api.get("/me", { validateStatus: () => true, timeout: 15000 });
     return r2;
@@ -44,43 +44,52 @@ async function tolerantGetMe() {
   }
 }
 
-// Essaie plusieurs chemins + query
-async function multiTryGet(basePaths, { headers, query = "" }) {
-  const q = query ? (basePaths[0]?.includes("?") ? `&${query}` : `?${query}`) : "";
-  for (const p of basePaths) {
+// Essaie plusieurs chemins (gère projets où baseURL = '/api' ou '/')
+async function multiTryGet(paths, { headers, query = "" }) {
+  const q = query ? (paths[0]?.includes("?") ? `&${query}` : `?${query}`) : "";
+  for (const p of paths) {
     try {
       const res = await api.get(`${p}${q}`, { headers, validateStatus: () => true });
       if (res.status === 200) return res;
-    } catch (_) {}
+    } catch {}
   }
   return null;
 }
 
-// --------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 
 const DashboardPage = () => {
+  // ---- session / rôle
   const cachedMe = readCachedMe();
   const [me, setMe] = useState(cachedMe);
   const [loadingMe, setLoadingMe] = useState(!cachedMe);
 
+  // ---- données
   const [incidents, setIncidents] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
   const [activity, setActivity] = useState([]);
+
+  // ---- UI/état
   const [period, setPeriod] = useState("7");
   const [bannerError, setBannerError] = useState("");
 
-  // Superadmin : gestion fiable du filtre commune (liste + sélection)
+  // ---- superadmin : communes
   const [communes, setCommunes] = useState([]);
   const [selectedCommuneId, setSelectedCommuneId] = useState(
     (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || ""
   );
 
-  // Evite d’écraser l’état par des réponses lentes
-  const lastFetchIdRef = useRef(0);
-  const lastDevicesFetchIdRef = useRef(0);
+  // ---- anti-clignotement : garder la dernière valeur “saine”
+  const lastGoodIncidentsRef = useRef([]);
+  const lastGoodNotifsRef = useRef([]);
+  const lastGoodDevicesRef = useRef(0);
 
-  // Charge /me (avec cache)
+  // ---- annuler réponses lentes
+  const fetchIdRef = useRef(0);
+  const devicesFetchIdRef = useRef(0);
+
+  // ---------- session ----------
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -117,37 +126,33 @@ const DashboardPage = () => {
     return () => { cancelled = true; };
   }, []);
 
-  // Charger la liste des communes pour le superadmin (dropdown fiable)
+  // ---------- communes (superadmin) ----------
   useEffect(() => {
     if (!loadingMe && me?.role === "superadmin") {
       (async () => {
-        try {
-          const r =
-            (await multiTryGet(["/api/communes", "communes"], { headers: {}, query: "" })) || null;
-          if (!r) { setCommunes([]); return; }
-          const arr = Array.isArray(r.data)
-            ? r.data
-            : Array.isArray(r.data?.items)
-            ? r.data.items
-            : Array.isArray(r.data?.data)
-            ? r.data.data
-            : [];
-          const normalized = (arr || [])
-            .map((c) => ({
-              id: String(c.id ?? c._id ?? c.slug ?? c.code ?? "").trim().toLowerCase(),
-              name: String(c.name ?? c.label ?? c.communeName ?? "Commune").trim(),
-            }))
-            .filter((c) => c.id)
-            .sort((a, b) => a.name.localeCompare(b.name, "fr"));
-          setCommunes(normalized);
-        } catch {
-          setCommunes([]);
-        }
+        const r =
+          (await multiTryGet(["/api/communes", "communes"], { headers: {}, query: "" })) || null;
+        if (!r) { setCommunes([]); return; }
+        const arr = Array.isArray(r.data)
+          ? r.data
+          : Array.isArray(r.data?.items)
+          ? r.data.items
+          : Array.isArray(r.data?.data)
+          ? r.data.data
+          : [];
+        const normalized = (arr || [])
+          .map((c) => ({
+            id: String(c.id ?? c._id ?? c.slug ?? c.code ?? "").trim().toLowerCase(),
+            name: String(c.name ?? c.label ?? c.communeName ?? "Commune").trim(),
+          }))
+          .filter((c) => c.id)
+          .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+        setCommunes(normalized);
       })();
     }
   }, [loadingMe, me]);
 
-  // Ne déconnecte que sur 401
+  // ---------- auth error ----------
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
     if (status === 401) {
@@ -160,107 +165,104 @@ const DashboardPage = () => {
     return false;
   }, []);
 
-  // Fait les requêtes incidents/notifications
+  // ---------- fetch incidents & notifs (sans reset) ----------
   const fetchData = useCallback(async () => {
     if (!me) return;
 
-    // Admin : aucun header de commune ; Superadmin : envoie x-commune-id seulement si une commune est sélectionnée
+    // Admin : aucun header de commune
+    // Superadmin : header seulement si une commune est choisie (sinon toutes)
     const headers = {};
     if (me.role === "superadmin" && selectedCommuneId) {
       headers["x-commune-id"] = selectedCommuneId.trim().toLowerCase();
     }
 
     const qs = period === "all" ? "" : `period=${period}`;
-    const fetchId = ++lastFetchIdRef.current;
+    const id = ++fetchIdRef.current;
 
     // --- incidents ---
     try {
-      const incidentsRes =
-        (await multiTryGet(["incidents", "/api/incidents"], { headers, query: qs })) ||
-        null;
+      const resp =
+        (await multiTryGet(["/api/incidents", "incidents"], { headers, query: qs })) || null;
 
-      if (fetchId !== lastFetchIdRef.current) return;
+      if (id !== fetchIdRef.current) return; // réponse obsolète
 
-      if (incidentsRes && incidentsRes.status === 200) {
-        const d = incidentsRes.data;
-        const arr = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : []);
+      if (resp?.status === 200) {
+        const d = resp.data;
+        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
         setIncidents(arr);
+        lastGoodIncidentsRef.current = arr; // ✅ mémorise
+      } else {
+        // ❌ pas de reset → on garde la dernière bonne valeur
+        if (lastGoodIncidentsRef.current.length) {
+          setIncidents(lastGoodIncidentsRef.current);
+        }
       }
-      // ne rien faire sur non-200 → on garde l’état existant (évite clignotement)
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // garder l’état existant
+      if (!handleAuthError(err) && lastGoodIncidentsRef.current.length) {
+        setIncidents(lastGoodIncidentsRef.current);
       }
     }
 
     // --- notifications ---
     try {
-      const notifsRes =
-        (await multiTryGet(["notifications", "/api/notifications"], { headers, query: qs })) ||
+      const resp =
+        (await multiTryGet(["/api/notifications", "notifications"], { headers, query: qs })) ||
         null;
 
-      if (fetchId !== lastFetchIdRef.current) return;
+      if (id !== fetchIdRef.current) return;
 
-      if (notifsRes && notifsRes.status === 200) {
-        const d = notifsRes.data;
-        const arr = Array.isArray(d) ? d : (Array.isArray(d?.items) ? d.items : []);
+      if (resp?.status === 200) {
+        const d = resp.data;
+        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
         setNotifications(arr);
+        lastGoodNotifsRef.current = arr;
+      } else {
+        if (Array.isArray(lastGoodNotifsRef.current)) {
+          setNotifications(lastGoodNotifsRef.current);
+        }
       }
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // silencieux, pas de reset
+      if (!handleAuthError(err) && Array.isArray(lastGoodNotifsRef.current)) {
+        setNotifications(lastGoodNotifsRef.current);
       }
     }
   }, [me, period, selectedCommuneId, handleAuthError]);
 
-  // Compteur d’utilisateurs (devices) — TOUJOURS total global (countAll)
+  // ---------- fetch devices (toujours global) ----------
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
 
-    const headersNoFilter = {}; // ne filtre jamais : on veut le global
-    const baseQuery = `activeDays=30`;
-    const fetchId = ++lastDevicesFetchIdRef.current;
+    const id = ++devicesFetchIdRef.current;
 
     try {
-      const countRes =
-        (await multiTryGet(["devices/count", "/api/devices/count"], { headers: headersNoFilter, query: baseQuery })) ||
-        null;
+      const resp =
+        (await multiTryGet(["/api/devices/count", "devices/count"], {
+          headers: {}, // pas de x-commune-id => global
+          query: "activeDays=30",
+        })) || null;
 
-      if (fetchId !== lastDevicesFetchIdRef.current) return;
+      if (id !== devicesFetchIdRef.current) return;
 
-      if (countRes && countRes.status === 200 && countRes.data) {
+      if (resp?.status === 200 && resp.data) {
         const total =
-          typeof countRes.data.countAll === "number"
-            ? countRes.data.countAll
-            : (typeof countRes.data.count === "number" ? countRes.data.count : 0);
-        setDeviceCount(total);
-        return;
-      }
-
-      // Fallback global (liste)
-      const listRes =
-        (await multiTryGet(["devices", "/api/devices"], { headers: headersNoFilter, query: "page=1&pageSize=1" })) ||
-        null;
-
-      if (fetchId !== lastDevicesFetchIdRef.current) return;
-
-      if (listRes && listRes.status === 200) {
-        const total =
-          typeof listRes.data?.total === "number"
-            ? listRes.data.total
-            : Array.isArray(listRes.data)
-            ? listRes.data.length
+          typeof resp.data.countAll === "number"
+            ? resp.data.countAll
+            : typeof resp.data.count === "number"
+            ? resp.data.count
             : 0;
         setDeviceCount(total);
+        lastGoodDevicesRef.current = total;
+      } else if (lastGoodDevicesRef.current) {
+        setDeviceCount(lastGoodDevicesRef.current);
       }
     } catch (err) {
-      if (!handleAuthError(err)) {
-        // ne pas mettre 0 si réseau HS
+      if (!handleAuthError(err) && lastGoodDevicesRef.current) {
+        setDeviceCount(lastGoodDevicesRef.current);
       }
     }
   }, [me, handleAuthError]);
 
-  // bootstrap + polling
+  // ---------- bootstrap + polling sûr ----------
   useEffect(() => {
     if (!loadingMe && me) {
       fetchData();
@@ -273,7 +275,7 @@ const DashboardPage = () => {
     }
   }, [loadingMe, me, fetchData, fetchDeviceCount]);
 
-  // Activité récente (dérivée)
+  // ---------- activité dérivée ----------
   useEffect(() => {
     const next = [
       ...incidents.slice(0, 3).map((inc) => ({
@@ -290,7 +292,7 @@ const DashboardPage = () => {
     setActivity(next);
   }, [incidents, notifications]);
 
-  // ---- Répartition types
+  // ---------- répartition types ----------
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
     for (const inc of incidents) {
@@ -414,8 +416,7 @@ const DashboardPage = () => {
                   setSelectedCommuneId(v);
                   if (v) localStorage.setItem("selectedCommuneId", v);
                   else localStorage.removeItem("selectedCommuneId");
-                  // incidents/notifications selon filtre
-                  fetchData();
+                  fetchData(); // rafraîchit incidents/notifs selon le filtre
                 }}
                 title="Filtrer par commune (laisser vide = toutes)"
               >

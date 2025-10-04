@@ -30,23 +30,19 @@ function readCachedMe() {
   }
 }
 
-// Commune “courante”
-function selectedCommuneFor(me) {
-  if (me?.role === "admin") {
-    return (me.communeId || "").toString().trim().toLowerCase();
-  }
-  if (me?.role === "superadmin") {
-    const v = (localStorage.getItem("selectedCommuneId") || "").toString().trim().toLowerCase();
-    return v;
-  }
-  return "";
+// Commune “courante” utilisée UNIQUEMENT par le superadmin pour filtrer
+function selectedCommuneForSuperadmin() {
+  const v = (localStorage.getItem("selectedCommuneId") || "").toString().trim().toLowerCase();
+  return v;
 }
 
-// Headers à envoyer
+// Headers à envoyer (superadmin uniquement)
 function buildHeaders(me) {
-  const cid = selectedCommuneFor(me);
   const headers = {};
-  if (cid) headers["x-commune-id"] = cid;
+  if (me?.role === "superadmin") {
+    const cid = selectedCommuneForSuperadmin();
+    if (cid) headers["x-commune-id"] = cid;
+  }
   return headers;
 }
 
@@ -64,7 +60,7 @@ async function tolerantGetMe() {
   }
 }
 
-// Essaie plusieurs chemins + les 2 variantes commune (header+query)
+// Essaie plusieurs chemins + query
 async function multiTryGet(basePaths, { headers, query = "" }) {
   const q = query ? (basePaths[0]?.includes("?") ? `&${query}` : `?${query}`) : "";
   for (const p of basePaths) {
@@ -148,18 +144,19 @@ const DashboardPage = () => {
   const fetchData = useCallback(async () => {
     if (!me) return;
 
-    const cid = selectedCommuneFor(me);
+    // Superadmin : peut filtrer via input ; Admin : AUCUN header/param commune ⇒ backend filtre par token
     const headers = buildHeaders(me);
+
+    // period seulement ; le filtre commune, si superadmin a saisi, est dans header
     const qs = period === "all" ? "" : `period=${period}`;
-    const communeQuery = cid ? (qs ? `${qs}&communeId=${encodeURIComponent(cid)}` : `communeId=${encodeURIComponent(cid)}`) : qs;
 
     const fetchId = ++lastFetchIdRef.current;
 
     // --- incidents ---
     try {
       const incidentsRes =
-        (await multiTryGet(["incidents", "/api/incidents"], { headers, query: communeQuery })) ||
-        (await multiTryGet(["incidents", "/api/incidents"], { headers: {}, query: communeQuery })) ||
+        (await multiTryGet(["incidents", "/api/incidents"], { headers, query: qs })) ||
+        (await multiTryGet(["incidents", "/api/incidents"], { headers: {}, query: qs })) ||
         null;
 
       if (fetchId !== lastFetchIdRef.current) return;
@@ -178,8 +175,8 @@ const DashboardPage = () => {
     // --- notifications ---
     try {
       const notifsRes =
-        (await multiTryGet(["notifications", "/api/notifications"], { headers, query: communeQuery })) ||
-        (await multiTryGet(["notifications", "/api/notifications"], { headers: {}, query: communeQuery })) ||
+        (await multiTryGet(["notifications", "/api/notifications"], { headers, query: qs })) ||
+        (await multiTryGet(["notifications", "/api/notifications"], { headers: {}, query: qs })) ||
         null;
 
       if (fetchId !== lastFetchIdRef.current) return;
@@ -196,39 +193,35 @@ const DashboardPage = () => {
     }
   }, [me, period, handleAuthError]);
 
-  // Compteur d’utilisateurs (devices)
+  // Compteur d’utilisateurs (devices) — TOUJOURS le total global (countAll si dispo)
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
 
-    const cid = selectedCommuneFor(me);
-    const headers = buildHeaders(me);
-    const baseQuery = `activeDays=30${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
+    // Pour le KPI voulu, on ne veut PAS filtrer par commune : total global
+    // On n’envoie donc pas x-commune-id ici, même pour superadmin.
+    const headersNoFilter = {};
+    const baseQuery = `activeDays=30`;
     const fetchId = ++lastDevicesFetchIdRef.current;
 
     try {
       const countRes =
-        (await multiTryGet(["devices/count", "/api/devices/count"], { headers, query: baseQuery })) ||
-        (await multiTryGet(["devices/count", "/api/devices/count"], { headers: {}, query: baseQuery })) ||
+        (await multiTryGet(["devices/count", "/api/devices/count"], { headers: headersNoFilter, query: baseQuery })) ||
         null;
 
       if (fetchId !== lastDevicesFetchIdRef.current) return;
 
       if (countRes && countRes.status === 200 && countRes.data) {
-        // ⬇️ clé de voûte : admin -> on affiche le total global (countAll) si dispo
         const total =
-          (me?.role === "admin" && typeof countRes.data.countAll === "number")
+          typeof countRes.data.countAll === "number"
             ? countRes.data.countAll
             : (typeof countRes.data.count === "number" ? countRes.data.count : 0);
-
         setDeviceCount(total);
         return;
       }
 
-      // Fallback à la liste paginée pour avoir total (scopé)
-      const listQuery = `page=1&pageSize=1${cid ? `&communeId=${encodeURIComponent(cid)}` : ""}`;
+      // Fallback à la liste paginée (global)
       const listRes =
-        (await multiTryGet(["devices", "/api/devices"], { headers, query: listQuery })) ||
-        (await multiTryGet(["devices", "/api/devices"], { headers: {}, query: listQuery })) ||
+        (await multiTryGet(["devices", "/api/devices"], { headers: headersNoFilter, query: "page=1&pageSize=1" })) ||
         null;
 
       if (fetchId !== lastDevicesFetchIdRef.current) return;
@@ -366,8 +359,8 @@ const DashboardPage = () => {
 
   if (loadingMe && !me) return <div className="p-6">Chargement…</div>;
 
-  // Bandeau informatif si manque de commune pour l’admin
-  const needsCommune = me?.role === "admin" && !selectedCommuneFor(me);
+  // Bandeau informatif si manque de commune pour l’admin (cas rare)
+  const needsCommune = me?.role === "admin" && !me?.communeId;
 
   return (
     <div className="p-4 sm:p-6">
@@ -398,13 +391,13 @@ const DashboardPage = () => {
             <input
               placeholder="Filtrer communeId (laisser vide = toutes)"
               className="border px-2 py-1 rounded w-full sm:w-64"
-              defaultValue={selectedCommuneFor(me) || ""}
+              defaultValue={selectedCommuneForSuperadmin() || ""}
               onBlur={(e) => {
                 const v = e.target.value.trim().toLowerCase();
                 if (v) localStorage.setItem("selectedCommuneId", v);
                 else localStorage.removeItem("selectedCommuneId");
+                // incidents/notifications filtrés pour superadmin selon input
                 fetchData();
-                fetchDeviceCount();
               }}
             />
           )}

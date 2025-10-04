@@ -6,6 +6,19 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { API_URL, INCIDENTS_PATH } from "../config";
 
+/* ================= Utils ================= */
+const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
+const pickCommuneFromUser = (u) =>
+  norm(
+    u?.communeId ??
+      u?.commune ??
+      u?.communeSlug ??
+      u?.commune_code ??
+      u?.communeCode ??
+      u?.communeName ??
+      ""
+  );
+
 /* ================= Cartes ================= */
 const IncidentMap = ({ latitude, longitude }) => (
   <MapContainer
@@ -49,9 +62,6 @@ const GlobalIncidentMap = ({ incidents }) => {
 };
 
 /* ============= Helpers requêtes (panel) ============= */
-
-const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
-
 /**
  * Headers :
  *  - Authorization toujours si token
@@ -66,8 +76,9 @@ function buildHeaders(me, selectedCommuneId) {
   if (me?.role === "superadmin") {
     const cid = norm(selectedCommuneId);
     if (cid) headers["x-commune-id"] = cid;
-  } else if (me?.role === "admin" && me?.communeId) {
-    headers["x-commune-id"] = norm(me.communeId);
+  } else if (me?.role === "admin") {
+    const cid = pickCommuneFromUser(me);
+    if (cid) headers["x-commune-id"] = cid;
   }
   return headers;
 }
@@ -75,7 +86,7 @@ function buildHeaders(me, selectedCommuneId) {
 /**
  * Params :
  *  - superadmin : ?communeId=… si filtre choisi
- *  - admin      : ?communeId=sa commune (le backend priorise header/query)
+ *  - admin      : ?communeId=sa commune
  */
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
@@ -83,8 +94,9 @@ function buildParams(me, selectedCommuneId, extra = {}) {
   if (me?.role === "superadmin") {
     const cid = norm(selectedCommuneId);
     if (cid) params.communeId = cid;
-  } else if (me?.role === "admin" && me?.communeId) {
-    params.communeId = norm(me.communeId);
+  } else if (me?.role === "admin") {
+    const cid = pickCommuneFromUser(me);
+    if (cid) params.communeId = cid;
   }
 
   return params;
@@ -106,10 +118,10 @@ const IncidentPage = () => {
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
+  // superadmin : par défaut AUCUN filtre → voit TOUT
   const savedCommunePref =
     (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
   const [communes, setCommunes] = useState([]);
-  // superadmin : par défaut AUCUN filtre → voit TOUT
   const [selectedCommuneId, setSelectedCommuneId] = useState(savedCommunePref);
 
   const prevIdsRef = useRef(new Set());
@@ -134,10 +146,19 @@ const IncidentPage = () => {
         });
 
         if (res.status === 200) {
-          // ✅ accepte { user: {...} } OU {...}
-          const user = res?.data?.user || res?.data || null;
-          setMe(user);
-          if (user) localStorage.setItem("me", JSON.stringify(user));
+          // tolère { user: {...} } ou {...}
+          const rawUser = res?.data?.user || res?.data || null;
+          if (rawUser) {
+            const normalized = {
+              ...rawUser,
+              // On force un champ "communeId" unifié côté front
+              communeId: pickCommuneFromUser(rawUser) || rawUser.communeId || null,
+            };
+            setMe(normalized);
+            localStorage.setItem("me", JSON.stringify(normalized));
+          } else {
+            setMe(null);
+          }
         } else if (res.status === 401) {
           localStorage.removeItem("token");
           window.location.href = "/login";
@@ -220,7 +241,7 @@ const IncidentPage = () => {
           await audioRef.current.play().catch(() => {});
         }
       } catch (e) {
-        console.warn("Audio unlock failed:", e?.message || e);
+        // rien
       } finally {
         document.removeEventListener("click", unlock);
         document.removeEventListener("keydown", unlock);
@@ -486,7 +507,6 @@ const IncidentPage = () => {
         </button>
       </div>
 
-      {/* Carte globale (optionnelle) */}
       {/* <GlobalIncidentMap incidents={incidents} /> */}
 
       {incidents.length === 0 ? (
@@ -553,10 +573,7 @@ const IncidentPage = () => {
                     📬 {incident.adresse || "Adresse inconnue"}
                   </p>
                   <p className="text-xs text-gray-400">
-                    🕒{" "}
-                    {incident.createdAt
-                      ? new Date(incident.createdAt).toLocaleString("fr-FR")
-                      : ""}
+                    🕒 {incident.createdAt ? new Date(incident.createdAt).toLocaleString("fr-FR") : ""}
                   </p>
 
                   {incident.latitude && incident.longitude && (

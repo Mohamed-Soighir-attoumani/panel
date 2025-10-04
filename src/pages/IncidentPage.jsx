@@ -50,10 +50,14 @@ const GlobalIncidentMap = ({ incidents }) => {
 
 /* ============= Helpers requêtes (panel) ============= */
 
+// normalise une commune pour les headers/params
+const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
+
 /**
  * Headers :
  *  - Authorization toujours si token
- *  - x-commune-id UNIQUEMENT si superadmin + filtre saisi
+ *  - superadmin : x-commune-id si un filtre est choisi
+ *  - admin      : x-commune-id = sa commune (force le scope côté backend)
  */
 function buildHeaders(me, selectedCommuneId) {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
@@ -61,24 +65,27 @@ function buildHeaders(me, selectedCommuneId) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   if (me?.role === "superadmin") {
-    const cid = (selectedCommuneId || "").toString().trim().toLowerCase();
+    const cid = norm(selectedCommuneId);
     if (cid) headers["x-commune-id"] = cid;
+  } else if (me?.role === "admin" && me?.communeId) {
+    headers["x-commune-id"] = norm(me.communeId);
   }
-  // Pour admin : pas de header x-commune-id → le backend forcera sa commune
   return headers;
 }
 
 /**
  * Params :
- *  - superadmin : envoie communeId si filtre choisi (sinon rien)
- *  - admin : n’envoie rien (le backend filtre par sa commune automatiquement)
+ *  - superadmin : ?communeId=… si un filtre est choisi
+ *  - admin      : ?communeId=sa commune (par sûreté → le backend priorise header/query)
  */
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
 
   if (me?.role === "superadmin") {
-    const cid = (selectedCommuneId || "").toString().trim().toLowerCase();
+    const cid = norm(selectedCommuneId);
     if (cid) params.communeId = cid;
+  } else if (me?.role === "admin" && me?.communeId) {
+    params.communeId = norm(me.communeId);
   }
 
   return params;
@@ -100,9 +107,11 @@ const IncidentPage = () => {
   const [statusFilter, setStatusFilter] = useState("Tous");
   const [periodFilter, setPeriodFilter] = useState(""); // "", "7", "30"
 
+  const savedCommunePref =
+    (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
   const [communes, setCommunes] = useState([]);
-  // IMPORTANT : par défaut, superadmin n’a AUCUN filtre → voit TOUT
-  const [selectedCommuneId, setSelectedCommuneId] = useState("");
+  // superadmin : par défaut AUCUN filtre => voit TOUT
+  const [selectedCommuneId, setSelectedCommuneId] = useState(savedCommunePref);
 
   const prevIdsRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
@@ -126,15 +135,15 @@ const IncidentPage = () => {
         });
 
         if (res.status === 200) {
-          const user = res?.data?.user || null;
+          // ✅ accepte { user: {...} } OU {...}
+          const user = res?.data?.user || res?.data || null;
           setMe(user);
-          localStorage.setItem("me", JSON.stringify(user));
+          if (user) localStorage.setItem("me", JSON.stringify(user));
         } else if (res.status === 401) {
           localStorage.removeItem("token");
           window.location.href = "/login";
           return;
         } else if (res.status === 403) {
-          // Reste sur la page mais signalera 403 lors des fetchs si besoin
           setMe(null);
         } else {
           console.warn("GET /me non-200:", res.status, res.data);
@@ -269,7 +278,6 @@ const IncidentPage = () => {
         period: periodFilter || undefined,
       });
 
-      // IMPORTANT : route sous /api/incidents (INCIDENTS_PATH)
       const response = await axios.get(`${API_URL}${INCIDENTS_PATH}`, {
         headers,
         params,
@@ -415,7 +423,6 @@ const IncidentPage = () => {
   /* --------- Persistance filtre superadmin (optionnel) --------- */
   useEffect(() => {
     if (me?.role === "superadmin") {
-      // on persiste pour confort, mais on NE L’APPLIQUE PAS par défaut au premier rendu
       if (selectedCommuneId) {
         localStorage.setItem("selectedCommuneId", selectedCommuneId);
       } else {
@@ -464,7 +471,6 @@ const IncidentPage = () => {
             value={selectedCommuneId}
             onChange={(e) => {
               setSelectedCommuneId(e.target.value);
-              // rafraîchir immédiatement quand on change de commune
               setTimeout(fetchIncidents, 0);
             }}
             title="Filtrer par commune (laisser vide pour toutes)"

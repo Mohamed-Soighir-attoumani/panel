@@ -21,6 +21,15 @@ function canonicalizeLabel(raw) {
   return { key, label };
 }
 
+function canonStatus(s) {
+  const x = String(s || "").trim().toLowerCase();
+  if (x === "en cours" || x === "encours") return "En cours";
+  if (x === "résolu" || x === "resolu") return "Résolu";
+  if (x === "en attente" || x === "enattente") return "En attente";
+  if (x === "rejeté" || x === "rejete" || x === "rejecte") return "Rejeté";
+  return s || "Inconnu";
+}
+
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -64,8 +73,15 @@ const DashboardPage = () => {
   const [me, setMe] = useState(cachedMe);
   const [loadingMe, setLoadingMe] = useState(!cachedMe);
 
-  // ---- données
-  const [incidents, setIncidents] = useState([]);
+  // ---- incidents pour la PÉRIODE (graphiques)
+  const [incidentsPeriod, setIncidentsPeriod] = useState([]);
+
+  // ---- incidents TOTAUX (KPI)
+  const [kpiTotal, setKpiTotal] = useState(0);
+  const [kpiOpen, setKpiOpen] = useState(0);
+  const [kpiResolved, setKpiResolved] = useState(0);
+
+  // ---- autres données
   const [notifications, setNotifications] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
   const [activity, setActivity] = useState([]);
@@ -81,13 +97,16 @@ const DashboardPage = () => {
   );
 
   // ---- anti-clignotement : garder la dernière valeur “saine”
-  const lastGoodIncidentsRef = useRef([]);
+  const lastGoodIncidentsPeriodRef = useRef([]);
+  const lastGoodKpisRef = useRef({ total: 0, open: 0, resolved: 0 });
   const lastGoodNotifsRef = useRef([]);
   const lastGoodDevicesRef = useRef(0);
 
   // ---- annuler réponses lentes
-  const fetchIdRef = useRef(0);
+  const periodFetchIdRef = useRef(0);
+  const kpiFetchIdRef = useRef(0);
   const devicesFetchIdRef = useRef(0);
+  const notifsFetchIdRef = useRef(0);
 
   // ---------- session ----------
   useEffect(() => {
@@ -152,6 +171,17 @@ const DashboardPage = () => {
     }
   }, [loadingMe, me]);
 
+  // ---------- helpers headers ----------
+  const buildHeaders = useCallback(() => {
+    // Admin : pas de header → le backend filtre leur commune via le token.
+    // Superadmin : header seulement si une commune est choisie (sinon toutes communes).
+    const h = {};
+    if (me?.role === "superadmin" && selectedCommuneId) {
+      h["x-commune-id"] = selectedCommuneId.trim().toLowerCase();
+    }
+    return h;
+  }, [me?.role, selectedCommuneId]);
+
   // ---------- auth error ----------
   const handleAuthError = useCallback((err) => {
     const status = err?.response?.status;
@@ -165,70 +195,82 @@ const DashboardPage = () => {
     return false;
   }, []);
 
-  // ---------- fetch incidents & notifs (sans reset) ----------
-  const fetchData = useCallback(async () => {
+  // ---------- Fetch incidents POUR LA PÉRIODE (graphiques) ----------
+  const fetchIncidentsForPeriod = useCallback(async () => {
     if (!me) return;
 
-    // Admin : aucun header de commune
-    // Superadmin : header seulement si une commune est choisie (sinon toutes)
-    const headers = {};
-    if (me.role === "superadmin" && selectedCommuneId) {
-      headers["x-commune-id"] = selectedCommuneId.trim().toLowerCase();
-    }
-
+    const headers = buildHeaders();
     const qs = period === "all" ? "" : `period=${period}`;
-    const id = ++fetchIdRef.current;
+    const id = ++periodFetchIdRef.current;
 
-    // --- incidents ---
     try {
       const resp =
         (await multiTryGet(["/api/incidents", "incidents"], { headers, query: qs })) || null;
 
-      if (id !== fetchIdRef.current) return; // réponse obsolète
+      if (id !== periodFetchIdRef.current) return; // réponse obsolète
 
       if (resp?.status === 200) {
         const d = resp.data;
         const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setIncidents(arr);
-        lastGoodIncidentsRef.current = arr; // ✅ mémorise
-      } else {
-        // ❌ pas de reset → on garde la dernière bonne valeur
-        if (lastGoodIncidentsRef.current.length) {
-          setIncidents(lastGoodIncidentsRef.current);
-        }
+        setIncidentsPeriod(arr);
+        lastGoodIncidentsPeriodRef.current = arr; // ✅ mémorise
+      } else if (lastGoodIncidentsPeriodRef.current.length) {
+        setIncidentsPeriod(lastGoodIncidentsPeriodRef.current);
       }
     } catch (err) {
-      if (!handleAuthError(err) && lastGoodIncidentsRef.current.length) {
-        setIncidents(lastGoodIncidentsRef.current);
+      if (!handleAuthError(err) && lastGoodIncidentsPeriodRef.current.length) {
+        setIncidentsPeriod(lastGoodIncidentsPeriodRef.current);
       }
     }
+  }, [me, period, buildHeaders, handleAuthError]);
 
-    // --- notifications ---
+  // ---------- Fetch incidents TOTAUX (KPI, sans période) ----------
+  const fetchKpisAllIncidents = useCallback(async () => {
+    if (!me) return;
+
+    const headers = buildHeaders();
+    const id = ++kpiFetchIdRef.current;
+
     try {
       const resp =
-        (await multiTryGet(["/api/notifications", "notifications"], { headers, query: qs })) ||
-        null;
+        (await multiTryGet(["/api/incidents", "incidents"], { headers, query: "" })) || null;
 
-      if (id !== fetchIdRef.current) return;
+      if (id !== kpiFetchIdRef.current) return;
 
       if (resp?.status === 200) {
         const d = resp.data;
-        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
-        setNotifications(arr);
-        lastGoodNotifsRef.current = arr;
-      } else {
-        if (Array.isArray(lastGoodNotifsRef.current)) {
-          setNotifications(lastGoodNotifsRef.current);
+        const all = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
+
+        let total = all.length;
+        let open = 0;
+        let resolved = 0;
+        for (const it of all) {
+          const st = canonStatus(it?.status);
+          if (st === "En cours") open += 1;
+          else if (st === "Résolu") resolved += 1;
         }
+
+        setKpiTotal(total);
+        setKpiOpen(open);
+        setKpiResolved(resolved);
+        lastGoodKpisRef.current = { total, open, resolved };
+      } else {
+        const last = lastGoodKpisRef.current;
+        setKpiTotal(last.total);
+        setKpiOpen(last.open);
+        setKpiResolved(last.resolved);
       }
     } catch (err) {
-      if (!handleAuthError(err) && Array.isArray(lastGoodNotifsRef.current)) {
-        setNotifications(lastGoodNotifsRef.current);
+      if (!handleAuthError(err)) {
+        const last = lastGoodKpisRef.current;
+        setKpiTotal(last.total);
+        setKpiOpen(last.open);
+        setKpiResolved(last.resolved);
       }
     }
-  }, [me, period, selectedCommuneId, handleAuthError]);
+  }, [me, buildHeaders, handleAuthError]);
 
-  // ---------- fetch devices (toujours global) ----------
+  // ---------- fetch devices (toujours GLOBAL) ----------
   const fetchDeviceCount = useCallback(async () => {
     if (!me) return;
 
@@ -262,23 +304,63 @@ const DashboardPage = () => {
     }
   }, [me, handleAuthError]);
 
+  // ---------- fetch notifications ----------
+  const fetchNotifications = useCallback(async () => {
+    if (!me) return;
+    const headers = buildHeaders();
+    const id = ++notifsFetchIdRef.current;
+
+    try {
+      const resp =
+        (await multiTryGet(["/api/notifications", "notifications"], { headers, query: "" })) || null;
+
+      if (id !== notifsFetchIdRef.current) return;
+
+      if (resp?.status === 200) {
+        const d = resp.data;
+        const arr = Array.isArray(d) ? d : Array.isArray(d?.items) ? d.items : [];
+        setNotifications(arr);
+        lastGoodNotifsRef.current = arr;
+      } else if (Array.isArray(lastGoodNotifsRef.current)) {
+        setNotifications(lastGoodNotifsRef.current);
+      }
+    } catch (err) {
+      if (!handleAuthError(err) && Array.isArray(lastGoodNotifsRef.current)) {
+        setNotifications(lastGoodNotifsRef.current);
+      }
+    }
+  }, [me, buildHeaders, handleAuthError]);
+
   // ---------- bootstrap + polling sûr ----------
   useEffect(() => {
     if (!loadingMe && me) {
-      fetchData();
+      fetchIncidentsForPeriod();
+      fetchKpisAllIncidents();
+      fetchNotifications();
       fetchDeviceCount();
       const i = setInterval(() => {
-        fetchData();
+        fetchIncidentsForPeriod();
+        fetchKpisAllIncidents();
+        fetchNotifications();
         fetchDeviceCount();
       }, 30000);
       return () => clearInterval(i);
     }
-  }, [loadingMe, me, fetchData, fetchDeviceCount]);
+  }, [
+    loadingMe,
+    me,
+    period,
+    selectedCommuneId,
+    fetchIncidentsForPeriod,
+    fetchKpisAllIncidents,
+    fetchNotifications,
+    fetchDeviceCount,
+  ]);
 
   // ---------- activité dérivée ----------
   useEffect(() => {
     const next = [
-      ...incidents.slice(0, 3).map((inc) => ({
+      ...incidentsPeriod.slice(0, 3).map((inc) => ({
         type: "incident",
         text: `Incident "${inc?.type || inc?.title || "Inconnu"}" signalé`,
         time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
@@ -290,12 +372,12 @@ const DashboardPage = () => {
       })),
     ];
     setActivity(next);
-  }, [incidents, notifications]);
+  }, [incidentsPeriod, notifications]);
 
-  // ---------- répartition types ----------
+  // ---------- répartition types (période) ----------
   const { typeLabels, typeCounts } = useMemo(() => {
     const map = new Map();
-    for (const inc of incidents) {
+    for (const inc of incidentsPeriod) {
       const raw = inc?.type || inc?.title || "Inconnu";
       const { key, label } = canonicalizeLabel(raw);
       const e = map.get(key) || { label, count: 0 };
@@ -304,8 +386,9 @@ const DashboardPage = () => {
     }
     const arr = Array.from(map.values()).sort((a, b) => b.count - a.count);
     return { typeLabels: arr.map((x) => x.label), typeCounts: arr.map((x) => x.count) };
-  }, [incidents]);
+  }, [incidentsPeriod]);
 
+  // ---------- charts ----------
   const barChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -342,7 +425,7 @@ const DashboardPage = () => {
     labels: typeLabels,
     datasets: [
       {
-        label: "Répartition des incidents (tous types)",
+        label: "Répartition des incidents (période)",
         data: typeCounts,
         backgroundColor: bgColors,
         borderColor: borderColors,
@@ -416,7 +499,9 @@ const DashboardPage = () => {
                   setSelectedCommuneId(v);
                   if (v) localStorage.setItem("selectedCommuneId", v);
                   else localStorage.removeItem("selectedCommuneId");
-                  fetchData(); // rafraîchit incidents/notifs selon le filtre
+                  // rafraîchir ciblé
+                  fetchIncidentsForPeriod();
+                  fetchKpisAllIncidents();
                 }}
                 title="Filtrer par commune (laisser vide = toutes)"
               >
@@ -432,7 +517,8 @@ const DashboardPage = () => {
                   onClick={() => {
                     setSelectedCommuneId("");
                     localStorage.removeItem("selectedCommuneId");
-                    fetchData();
+                    fetchIncidentsForPeriod();
+                    fetchKpisAllIncidents();
                   }}
                   className="border px-3 py-1 rounded hover:bg-gray-50"
                   title="Réinitialiser le filtre commune"
@@ -445,7 +531,9 @@ const DashboardPage = () => {
 
           <button
             onClick={() => {
-              fetchData();
+              fetchIncidentsForPeriod();
+              fetchKpisAllIncidents();
+              fetchNotifications();
               fetchDeviceCount();
             }}
             className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
@@ -455,29 +543,19 @@ const DashboardPage = () => {
         </div>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs (calculés sur TOUS les incidents de la commune, hors période) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
-        <KpiCard
-          icon="🚨"
-          label="Incidents EN COURS"
-          value={incidents.filter((i) => i.status === "En cours").length}
-          color="text-red-600"
-        />
-        <KpiCard
-          icon="✅"
-          label="Incidents RÉSOLUS"
-          value={incidents.filter((i) => i.status === "Résolu").length}
-          color="text-green-600"
-        />
-        <KpiCard icon="📋" label="Incidents TOTAL" value={incidents.length} color="text-blue-600" />
+        <KpiCard icon="🚨" label="Incidents EN COURS" value={kpiOpen} color="text-red-600" />
+        <KpiCard icon="✅" label="Incidents RÉSOLUS" value={kpiResolved} color="text-green-600" />
+        <KpiCard icon="📋" label="Incidents TOTAL" value={kpiTotal} color="text-blue-600" />
         <KpiCard icon="🔔" label="Notifications" value={notifications.length} color="text-purple-600" />
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
-      {/* Courbe */}
-      <IncidentsChart incidents={incidents} period={period} />
+      {/* Courbe (période) */}
+      <IncidentsChart incidents={incidentsPeriod} period={period} />
 
-      {/* Répartition par types */}
+      {/* Répartition par types (période) */}
       <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
         <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
         {typeLabels.length === 0 ? (
@@ -492,7 +570,7 @@ const DashboardPage = () => {
         <DevicesTable />
       </div>
 
-      {/* Activité récente */}
+      {/* Activité récente (période) */}
       <div className="bg-white p-4 shadow rounded mt-6">
         <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
         {activity.length === 0 ? (

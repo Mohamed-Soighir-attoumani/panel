@@ -50,13 +50,12 @@ const GlobalIncidentMap = ({ incidents }) => {
 
 /* ============= Helpers requêtes (panel) ============= */
 
-// normalise une commune pour les headers/params
 const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
 
 /**
  * Headers :
  *  - Authorization toujours si token
- *  - superadmin : x-commune-id si un filtre est choisi
+ *  - superadmin : x-commune-id si filtre choisi
  *  - admin      : x-commune-id = sa commune (force le scope côté backend)
  */
 function buildHeaders(me, selectedCommuneId) {
@@ -75,8 +74,8 @@ function buildHeaders(me, selectedCommuneId) {
 
 /**
  * Params :
- *  - superadmin : ?communeId=… si un filtre est choisi
- *  - admin      : ?communeId=sa commune (par sûreté → le backend priorise header/query)
+ *  - superadmin : ?communeId=… si filtre choisi
+ *  - admin      : ?communeId=sa commune (le backend priorise header/query)
  */
 function buildParams(me, selectedCommuneId, extra = {}) {
   const params = { ...extra };
@@ -110,13 +109,13 @@ const IncidentPage = () => {
   const savedCommunePref =
     (typeof window !== "undefined" && localStorage.getItem("selectedCommuneId")) || "";
   const [communes, setCommunes] = useState([]);
-  // superadmin : par défaut AUCUN filtre => voit TOUT
+  // superadmin : par défaut AUCUN filtre → voit TOUT
   const [selectedCommuneId, setSelectedCommuneId] = useState(savedCommunePref);
 
   const prevIdsRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
 
-  // --- Gestion du son (nouveaux incidents détectés) ---
+  // --- Son notif ---
   const SOUND_URL =
     (typeof window !== "undefined" ? window.location.origin : "") + "/sounds/notification.mp3";
   const audioRef = useRef(null);
@@ -255,7 +254,6 @@ const IncidentPage = () => {
   const playNotificationSound = async () => {
     const audio = audioRef.current;
     if (!audio) return;
-
     if (!isAudioAllowedRef.current || document.visibilityState !== "visible") {
       pendingPlayRef.current = true;
       return;
@@ -263,8 +261,7 @@ const IncidentPage = () => {
     try {
       audio.currentTime = 0;
       await audio.play();
-    } catch (err) {
-      console.error("Erreur lecture son :", err);
+    } catch {
       pendingPlayRef.current = true;
     }
   };
@@ -304,12 +301,10 @@ const IncidentPage = () => {
       }
 
       let data = response.data.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
       if (statusFilter !== "Tous") {
         data = data.filter((item) => item.status === statusFilter);
       }
 
-      // Détection de nouveaux incidents et son
       const newIds = data.map((it) => it?._id).filter(Boolean);
       let hasNew = false;
       for (const id of newIds) {
@@ -318,9 +313,8 @@ const IncidentPage = () => {
           break;
         }
       }
-      if (!isFirstLoadRef.current && hasNew) {
-        playNotificationSound();
-      }
+      if (!isFirstLoadRef.current && hasNew) playNotificationSound();
+
       prevIdsRef.current = new Set(newIds);
       if (isFirstLoadRef.current) isFirstLoadRef.current = false;
 
@@ -420,7 +414,7 @@ const IncidentPage = () => {
     }
   };
 
-  /* --------- Persistance filtre superadmin (optionnel) --------- */
+  /* --------- Persistance filtre superadmin --------- */
   useEffect(() => {
     if (me?.role === "superadmin") {
       if (selectedCommuneId) {

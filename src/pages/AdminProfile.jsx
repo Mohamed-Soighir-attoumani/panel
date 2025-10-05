@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Lock, Users, Settings, LogOut, ShieldCheck, User as UserIcon, ArrowLeftCircle } from "lucide-react";
 
-/** Lecture rapide du cache me */
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -12,7 +11,6 @@ function readCachedMe() {
   }
 }
 
-/** GET /api/me avec fallback /me */
 async function tolerantGetMe() {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -81,7 +79,6 @@ export default function AdminProfile() {
         } catch {}
         setError("");
       } else if (data?.__status === 401) {
-        // Non connecté
         handleLogout(true);
       } else if (data?.__status === 403) {
         setError("Accès refusé.");
@@ -101,8 +98,7 @@ export default function AdminProfile() {
       localStorage.removeItem("token_orig");
       localStorage.removeItem("me");
     } catch {}
-    if (!silent) navigate("/login");
-    else navigate("/login");
+    navigate("/login");
   };
 
   const canManageUsers = useMemo(() => me?.role === "superadmin", [me?.role]);
@@ -120,11 +116,9 @@ export default function AdminProfile() {
       if (orig) {
         localStorage.setItem("token", orig);
         localStorage.removeItem("token_orig");
-        // purge "me" pour forcer un /me propre
         localStorage.removeItem("me");
       }
     } catch {}
-    // Recharger la page d'accueil (ou tableau de bord)
     navigate("/");
     setTimeout(() => window.location.reload(), 50);
   };
@@ -132,7 +126,6 @@ export default function AdminProfile() {
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
       <div className="max-w-md mx-auto bg-white shadow-md rounded-lg p-6">
-        {/* Bandeau impersonation */}
         {me?.impersonated && (
           <div className="mb-4 rounded border border-amber-300 bg-amber-50 text-amber-800 p-3 flex items-start gap-2">
             <ShieldCheck className="w-5 h-5 mt-0.5" />
@@ -149,7 +142,6 @@ export default function AdminProfile() {
           </div>
         )}
 
-        {/* En-tête profil */}
         <div className="flex flex-col items-center space-y-4 mb-6">
           <Avatar name={me?.name || me?.email} photoUrl={me?.photo} />
           <h2 className="text-2xl font-bold text-gray-700">

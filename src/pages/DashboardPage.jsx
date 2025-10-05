@@ -77,6 +77,24 @@ const pickCommuneFromUser = (u) =>
       ""
   );
 
+// Construit un querystring robuste commune + extras (period, etc.)
+function buildQuery(me, selectedCommuneId, extra = {}) {
+  const params = new URLSearchParams();
+  // Superadmin : commune optionnelle (toutes si vide)
+  if (me?.role === "superadmin" && selectedCommuneId) {
+    params.set("communeId", norm(selectedCommuneId));
+  }
+  // Admin : commune OBLIGATOIRE
+  if (me?.role === "admin" && me?.communeId) {
+    params.set("communeId", norm(me.communeId));
+  }
+  // Extra params (period, etc.)
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined && v !== null && String(v).length) params.set(k, String(v));
+  }
+  return params.toString();
+}
+
 // -------------------------------------------------------------------------
 
 const DashboardPage = () => {
@@ -188,11 +206,16 @@ const DashboardPage = () => {
   // ---------- headers ----------
   const buildHeaders = useCallback(() => {
     const h = {};
-    // ⬇️ TRÈS IMPORTANT : en admin, on envoie la commune (slug) pour que le backend filtre correctement
+    // Auth (au cas où l'instance axios n'injecte pas)
+    try {
+      const token = localStorage.getItem("token") || "";
+      if (token) h.Authorization = `Bearer ${token}`;
+    } catch {}
+    // ⬇️ IMPORTANT : on envoie aussi la commune côté panel pour que le backend scope bien
     if (me?.role === "superadmin" && selectedCommuneId) {
-      h["x-commune-id"] = selectedCommuneId.trim().toLowerCase();
+      h["x-commune-id"] = norm(selectedCommuneId);
     } else if (me?.role === "admin" && me?.communeId) {
-      h["x-commune-id"] = String(me.communeId).trim().toLowerCase();
+      h["x-commune-id"] = norm(me.communeId);
     }
     return h;
   }, [me?.role, me?.communeId, selectedCommuneId]);
@@ -214,8 +237,14 @@ const DashboardPage = () => {
   const fetchIncidentsForPeriod = useCallback(async () => {
     if (!me) return;
 
+    // Si admin sans commune → rien à afficher
+    if (me.role === "admin" && !me.communeId) return;
+
     const headers = buildHeaders();
-    const qs = period === "all" ? "" : `period=${period}`;
+    const qs = period === "all"
+      ? buildQuery(me, selectedCommuneId, {})
+      : buildQuery(me, selectedCommuneId, { period });
+
     const id = ++periodFetchIdRef.current;
 
     try {
@@ -237,18 +266,20 @@ const DashboardPage = () => {
         setIncidentsPeriod(lastGoodIncidentsPeriodRef.current);
       }
     }
-  }, [me, period, buildHeaders, handleAuthError]);
+  }, [me, period, selectedCommuneId, buildHeaders, handleAuthError]);
 
   // ---------- Fetch incidents TOTAUX (KPI) ----------
   const fetchKpisAllIncidents = useCallback(async () => {
     if (!me) return;
+    if (me.role === "admin" && !me.communeId) return;
 
     const headers = buildHeaders();
+    const qs = buildQuery(me, selectedCommuneId, {});
     const id = ++kpiFetchIdRef.current;
 
     try {
       const resp =
-        (await multiTryGet(["/api/incidents", "incidents"], { headers, query: "" })) || null;
+        (await multiTryGet(["/api/incidents", "incidents"], { headers, query: qs })) || null;
 
       if (id !== kpiFetchIdRef.current) return;
 
@@ -283,7 +314,7 @@ const DashboardPage = () => {
         setKpiResolved(last.resolved);
       }
     }
-  }, [me, buildHeaders, handleAuthError]);
+  }, [me, selectedCommuneId, buildHeaders, handleAuthError]);
 
   // ---------- fetch devices (global) ----------
   const fetchDeviceCount = useCallback(async () => {
@@ -322,12 +353,15 @@ const DashboardPage = () => {
   // ---------- fetch notifications ----------
   const fetchNotifications = useCallback(async () => {
     if (!me) return;
+    if (me.role === "admin" && !me.communeId) return;
+
     const headers = buildHeaders();
+    const qs = buildQuery(me, selectedCommuneId, {});
     const id = ++notifsFetchIdRef.current;
 
     try {
       const resp =
-        (await multiTryGet(["/api/notifications", "notifications"], { headers, query: "" })) || null;
+        (await multiTryGet(["/api/notifications", "notifications"], { headers, query: qs })) || null;
 
       if (id !== notifsFetchIdRef.current) return;
 
@@ -344,7 +378,7 @@ const DashboardPage = () => {
         setNotifications(lastGoodNotifsRef.current);
       }
     }
-  }, [me, buildHeaders, handleAuthError]);
+  }, [me, selectedCommuneId, buildHeaders, handleAuthError]);
 
   // ---------- bootstrap + polling ----------
   useEffect(() => {
@@ -380,11 +414,11 @@ const DashboardPage = () => {
         text: `Incident "${inc?.type || inc?.title || "Inconnu"}" signalé`,
         time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
       })),
-      ...notifications.slice(0, 3).map((n) => ({
-        type: "notification",
-        text: `Notification: ${n?.title || n?.message || "Sans titre"}`,
-        time: n?.createdAt ? new Date(n.createdAt).toLocaleString("fr-FR") : "Date inconnue",
-      })),
+      ...notifications.slice(0, 3).map((n) => ([
+        "notification",
+        `Notification: ${n?.title || n?.message || "Sans titre"}`,
+        n?.createdAt ? new Date(n.createdAt).toLocaleString("fr-FR") : "Date inconnue",
+      ])).map(([type, text, time]) => ({ type, text, time })),
     ];
     setActivity(next);
   }, [incidentsPeriod, notifications]);
@@ -488,8 +522,76 @@ const DashboardPage = () => {
         </div>
       )}
 
-      {/* ... (le reste est inchangé : KPIs, charts, devices, activité) ... */}
-      {/* Assure-toi juste que fetchIncidentsForPeriod/fetchKpisAllIncidents sont bien appelés comme ci-dessus */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
+        <h1 className="text-2xl sm:text-3xl font-bold text-center sm:text-left">📊 Tableau de bord</h1>
+
+        <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+          <label className="font-medium">📅 Période :</label>
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value)}
+            className="border px-2 py-1 rounded w-full sm:w-auto"
+          >
+            <option value="7">7 derniers jours</option>
+            <option value="30">30 derniers jours</option>
+            <option value="all">Tous</option>
+          </select>
+
+          {me?.role === "superadmin" && (
+            <>
+              <select
+                className="border px-2 py-1 rounded w-full sm:w-72"
+                value={selectedCommuneId}
+                onChange={(e) => {
+                  const v = e.target.value.trim().toLowerCase();
+                  setSelectedCommuneId(v);
+                  if (v) localStorage.setItem("selectedCommuneId", v);
+                  else localStorage.removeItem("selectedCommuneId");
+                  // rafraîchir ciblé
+                  fetchIncidentsForPeriod();
+                  fetchKpisAllIncidents();
+                }}
+                title="Filtrer par commune (laisser vide = toutes)"
+              >
+                <option value="">Toutes les communes</option>
+                {communes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.id})
+                  </option>
+                ))}
+              </select>
+              {selectedCommuneId && (
+                <button
+                  onClick={() => {
+                    setSelectedCommuneId("");
+                    localStorage.removeItem("selectedCommuneId");
+                    fetchIncidentsForPeriod();
+                    fetchKpisAllIncidents();
+                  }}
+                  className="border px-3 py-1 rounded hover:bg-gray-50"
+                  title="Réinitialiser le filtre commune"
+                >
+                  Réinitialiser
+                </button>
+              )}
+            </>
+          )}
+
+          <button
+            onClick={() => {
+              fetchIncidentsForPeriod();
+              fetchKpisAllIncidents();
+              fetchNotifications();
+              fetchDeviceCount();
+            }}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full sm:w-auto transition"
+          >
+            🔄 Rafraîchir
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs (calculés sur TOUS les incidents de la commune, hors période) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4 mb-6">
         <KpiCard icon="🚨" label="Incidents EN COURS" value={kpiOpen} color="text-red-600" />
         <KpiCard icon="✅" label="Incidents RÉSOLUS" value={kpiResolved} color="text-green-600" />
@@ -498,8 +600,37 @@ const DashboardPage = () => {
         <KpiCard icon="👥" label="Utilisateurs" value={deviceCount} color="text-gray-800" />
       </div>
 
+      {/* Courbe (période) */}
       <IncidentsChart incidents={incidentsPeriod} period={period} />
-      {/* Répartition par types + DevicesTable + Activité récents : inchangés */}
+
+      {/* Répartition par types (période) */}
+      <div className="bg-white p-4 rounded shadow mb-8" style={{ height: 420 }}>
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">🧭 Répartition par types</h3>
+        {typeLabels.length === 0 ? (
+          <p className="text-gray-500">Aucun incident pour la période choisie.</p>
+        ) : (
+          <Bar data={barChartData} options={barChartOptions} plugins={[ChartDataLabels]} />
+        )}
+      </div>
+
+      {/* Table devices */}
+      <div className="mt-6">
+        <DevicesTable />
+      </div>
+
+      {/* Activité récente (période) */}
+      <div className="bg-white p-4 shadow rounded mt-6">
+        <h3 className="text-lg sm:text-xl font-semibold mb-4">📜 Activité Récente</h3>
+        {activity.length === 0 ? (
+          <p className="text-gray-500">Aucune activité récente.</p>
+        ) : (
+          <ul className="divide-y">
+            {activity.map((act, index) => (
+              <ActivityItem key={index} {...act} />
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

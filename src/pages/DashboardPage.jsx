@@ -64,75 +64,31 @@ async function multiTryGet(paths, { headers, query = "" }) {
   return null;
 }
 
-/* ---------- Normalisation commune SÛRE ---------- */
-const norm = (v) => (v == null ? "" : String(v).trim());
-const lc = (v) => norm(v).toLowerCase();
-const HEX24_RX = /^[a-f0-9]{24}$/i;
-const SLUG_RX = /^[a-z0-9][a-z0-9-_]{1,62}$/;
+/* ---------- pick commune admin ---------- */
+const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
+const pickCommuneFromUser = (u) =>
+  norm(
+    u?.communeId ??
+      u?.commune ??
+      u?.communeSlug ??
+      u?.commune_code ??
+      u?.communeCode ??
+      u?.communeName ??
+      ""
+  );
 
-function extractHex24FromUnknown(x) {
-  if (!x) return "";
-  if (typeof x === "object") {
-    if (typeof x.$oid === "string" && HEX24_RX.test(x.$oid)) return x.$oid;
-    try {
-      const m = JSON.stringify(x).match(/[a-f0-9]{24}/i);
-      if (m && HEX24_RX.test(m[0])) return m[0];
-    } catch {}
-    return "";
-  }
-  const s = String(x);
-  // ObjectId("...") / 24hex dans une chaîne
-  const m = s.match(/[a-f0-9]{24}/i);
-  return m && HEX24_RX.test(m[0]) ? m[0] : "";
-}
-
-/** Retourne une clé commune sûre (slug ou _id 24hex) sinon "" */
-function toSafeCommuneKey(value) {
-  const raw = value;
-  // 1) tente un ObjectId valide
-  const hex = extractHex24FromUnknown(raw);
-  if (hex) return hex.toLowerCase();
-
-  // 2) si c'est une string "simple", accepte slug/hex
-  const s = lc(raw);
-  if (!s || s === "[object object]" || s.includes(" ") || s.includes("{") || s.includes("[")) {
-    return "";
-  }
-  if (HEX24_RX.test(s) || SLUG_RX.test(s)) return s;
-  return "";
-}
-
-/** Cherche une commune sûre sur l'objet user (communeId/commune/slug/code/name) */
-function pickSafeCommuneFromUser(u) {
-  const candidates = [
-    u?.communeId,
-    u?.commune,
-    u?.communeSlug,
-    u?.commune_code,
-    u?.communeCode,
-  ];
-  for (const c of candidates) {
-    const k = toSafeCommuneKey(c);
-    if (k) return k;
-  }
-  // ⚠️ NE PAS "deviner" depuis communeName (risque de mismatch); laisser le backend résoudre via JWT
-  return "";
-}
-
-/* Construit un querystring robuste commune + extras (period, etc.).
-   ⚠️ N'ajoute communeId pour admin que si la clé est sûre (sinon on laisse le backend décider via JWT/DB). */
+// Construit un querystring robuste commune + extras (period, etc.)
 function buildQuery(me, selectedCommuneId, extra = {}) {
   const params = new URLSearchParams();
-
-  if (me?.role === "superadmin") {
-    const cid = toSafeCommuneKey(selectedCommuneId);
-    if (cid) params.set("communeId", cid);
-  } else if (me?.role === "admin") {
-    const cid = toSafeCommuneKey(me?.communeId);
-    if (cid) params.set("communeId", cid);
-    // sinon: ne rien envoyer → le backend utilisera la commune du JWT/DB
+  // Superadmin : commune optionnelle (toutes si vide)
+  if (me?.role === "superadmin" && selectedCommuneId) {
+    params.set("communeId", norm(selectedCommuneId));
   }
-
+  // Admin : commune OBLIGATOIRE
+  if (me?.role === "admin" && me?.communeId) {
+    params.set("communeId", norm(me.communeId));
+  }
+  // Extra params (period, etc.)
   for (const [k, v] of Object.entries(extra)) {
     if (v !== undefined && v !== null && String(v).length) params.set(k, String(v));
   }
@@ -193,12 +149,8 @@ const DashboardPage = () => {
         if (res.status === 200) {
           const user = res?.data?.user || res?.data || null;
           if (user) {
-            // ✅ normalise commune côté admin, mais uniquement si c'est une clé SÛRE
-            const safeKey = pickSafeCommuneFromUser(user);
-            const normalized = {
-              ...user,
-              communeId: safeKey || "", // si pas sûre → on met "", le backend s'en occupera via JWT/DB
-            };
+            // ✅ normalise commune côté admin
+            const normalized = { ...user, communeId: pickCommuneFromUser(user) || user.communeId || "" };
             setMe(normalized);
             localStorage.setItem("me", JSON.stringify(normalized));
             setBannerError("");
@@ -259,14 +211,11 @@ const DashboardPage = () => {
       const token = localStorage.getItem("token") || "";
       if (token) h.Authorization = `Bearer ${token}`;
     } catch {}
-
-    if (me?.role === "superadmin") {
-      const cid = toSafeCommuneKey(selectedCommuneId);
-      if (cid) h["x-commune-id"] = cid;
-    } else if (me?.role === "admin") {
-      const cid = toSafeCommuneKey(me?.communeId);
-      if (cid) h["x-commune-id"] = cid;
-      // sinon: NE RIEN ENVOYER → le backend utilisera la commune portée par le JWT/DB
+    // ⬇️ IMPORTANT : on envoie aussi la commune côté panel pour que le backend scope bien
+    if (me?.role === "superadmin" && selectedCommuneId) {
+      h["x-commune-id"] = norm(selectedCommuneId);
+    } else if (me?.role === "admin" && me?.communeId) {
+      h["x-commune-id"] = norm(me.communeId);
     }
     return h;
   }, [me?.role, me?.communeId, selectedCommuneId]);
@@ -288,11 +237,13 @@ const DashboardPage = () => {
   const fetchIncidentsForPeriod = useCallback(async () => {
     if (!me) return;
 
+    // Si admin sans commune → rien à afficher
+    if (me.role === "admin" && !me.communeId) return;
+
     const headers = buildHeaders();
-    const qs =
-      period === "all"
-        ? buildQuery(me, selectedCommuneId, {})
-        : buildQuery(me, selectedCommuneId, { period });
+    const qs = period === "all"
+      ? buildQuery(me, selectedCommuneId, {})
+      : buildQuery(me, selectedCommuneId, { period });
 
     const id = ++periodFetchIdRef.current;
 
@@ -320,6 +271,7 @@ const DashboardPage = () => {
   // ---------- Fetch incidents TOTAUX (KPI) ----------
   const fetchKpisAllIncidents = useCallback(async () => {
     if (!me) return;
+    if (me.role === "admin" && !me.communeId) return;
 
     const headers = buildHeaders();
     const qs = buildQuery(me, selectedCommuneId, {});
@@ -401,6 +353,7 @@ const DashboardPage = () => {
   // ---------- fetch notifications ----------
   const fetchNotifications = useCallback(async () => {
     if (!me) return;
+    if (me.role === "admin" && !me.communeId) return;
 
     const headers = buildHeaders();
     const qs = buildQuery(me, selectedCommuneId, {});
@@ -461,14 +414,11 @@ const DashboardPage = () => {
         text: `Incident "${inc?.type || inc?.title || "Inconnu"}" signalé`,
         time: inc?.createdAt ? new Date(inc.createdAt).toLocaleString("fr-FR") : "Date inconnue",
       })),
-      ...notifications
-        .slice(0, 3)
-        .map((n) => ([
-          "notification",
-          `Notification: ${n?.title || n?.message || "Sans titre"}`,
-          n?.createdAt ? new Date(n.createdAt).toLocaleString("fr-FR") : "Date inconnue",
-        ]))
-        .map(([type, text, time]) => ({ type, text, time })),
+      ...notifications.slice(0, 3).map((n) => ({
+        type: "notification",
+        text: `Notification: ${n?.title || n?.message || "Sans titre"}`,
+        time: n?.createdAt ? new Date(n.createdAt).toLocaleString("fr-FR") : "Date inconnue",
+      })),
     ];
     setActivity(next);
   }, [incidentsPeriod, notifications]);
@@ -560,9 +510,7 @@ const DashboardPage = () => {
 
   if (loadingMe && !me) return <div className="p-6">Chargement…</div>;
 
-  // on considère "besoin de commune" seulement si la clé sûre est vide
-  const needsCommune =
-    me?.role === "admin" && !toSafeCommuneKey(me?.communeId) && !toSafeCommuneKey(me?.commune);
+  const needsCommune = me?.role === "admin" && !me?.communeId;
 
   return (
     <div className="p-4 sm:p-6">

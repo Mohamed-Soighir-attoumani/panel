@@ -536,7 +536,12 @@ export default function Utilisateurs() {
       });
       if (r.status >= 400)
         throw new Error(r.data?.message || "Factures indisponibles");
-      const arr = Array.isArray(r.data?.invoices) ? r.data.invoices : [];
+      // accepte { items: [...] } ou { invoices: [...] }
+      const arr = Array.isArray(r.data?.items)
+        ? r.data.items
+        : Array.isArray(r.data?.invoices)
+        ? r.data.invoices
+        : [];
       setInvoices(arr);
     } catch (e) {
       toast.error(
@@ -719,12 +724,17 @@ export default function Utilisateurs() {
                 toast.error("Email invalide");
                 return;
               }
+              if (!createForm.communeId && !createForm.communeName) {
+                toast.error("Renseigne au moins 'communeId' ou 'communeName'.");
+                return;
+              }
               try {
                 setCreating(true);
                 const payload = {
                   ...createForm,
                 };
-                const r = await axios.post(`${API_URL}/api/users`, payload, {
+                // ✅ Utiliser la bonne route côté backend
+                const r = await axios.post(`${API_URL}/api/admins`, payload, {
                   headers: { Authorization: `Bearer ${token}` },
                   timeout: 20000,
                   validateStatus: (s) => s >= 200 && s < 500,
@@ -779,7 +789,7 @@ export default function Utilisateurs() {
             />
             <input
               className="border rounded px-3 py-2"
-              placeholder="communeId"
+              placeholder="communeId (slug ou id)"
               value={createForm.communeId}
               onChange={(e) =>
                 setCreateForm({ ...createForm, communeId: e.target.value })
@@ -787,7 +797,7 @@ export default function Utilisateurs() {
             />
             <input
               className="border rounded px-3 py-2"
-              placeholder="communeName"
+              placeholder="communeName (si pas d'id)"
               value={createForm.communeName}
               onChange={(e) =>
                 setCreateForm({ ...createForm, communeName: e.target.value })

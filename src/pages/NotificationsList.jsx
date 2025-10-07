@@ -1,19 +1,7 @@
+// src/pages/NotificationsList.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import api from "../api";
 import { NOTIFICATIONS_PATH } from "../config";
-
-function buildHeaders() {
-  const headers = {};
-  try {
-    const me = JSON.parse(localStorage.getItem("me") || "null");
-    if (me?.role === "admin" && me?.communeId) headers["x-commune-id"] = me.communeId;
-    if (me?.role === "superadmin") {
-      const cid = localStorage.getItem("selectedCommuneId") || "";
-      if (cid) headers["x-commune-id"] = cid;
-    }
-  } catch {}
-  return headers;
-}
 
 export default function NotificationsList() {
   const [me, setMe] = useState(null);
@@ -24,30 +12,52 @@ export default function NotificationsList() {
   const [editId, setEditId] = useState(null);
   const [editForm, setEditForm] = useState({ title: "", message: "" });
 
+  // Charge me : localStorage d'abord, sinon /api/me
   useEffect(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem("me") || "null");
-      setMe(cached);
-    } catch { setMe(null); }
+    (async () => {
+      try {
+        const cached = JSON.parse(localStorage.getItem("me") || "null");
+        if (cached) {
+          setMe(cached);
+          return;
+        }
+        const res = await api.get("/api/me", { validateStatus: () => true });
+        if (res.status === 200) {
+          const user = res.data?.user || res.data || null;
+          setMe(user);
+          localStorage.setItem("me", JSON.stringify(user));
+        } else if (res.status === 401 || res.status === 403) {
+          localStorage.removeItem("token");
+          window.location.assign("/login");
+        }
+      } catch {
+        // soft-fail
+      }
+    })();
   }, []);
 
-  const extraHeaders = useMemo(buildHeaders, [
-    localStorage.getItem("me"),
-    localStorage.getItem("selectedCommuneId"),
-  ]);
+  // Envoie x-commune-id seulement pour un ADMIN
+  const extraHeaders = useMemo(() => {
+    const h = {};
+    if (me?.role === "admin" && me?.communeId) h["x-commune-id"] = me.communeId;
+    // Superadmin: ne rien envoyer → le backend renverra TOUTES les communes
+    return h;
+  }, [me]);
 
   const fetchAll = async () => {
     try {
       setLoading(true);
       const params = period ? { period } : {};
-      // IMPORTANT : utiliser l’instance api + chemin constant
       const res = await api.get(NOTIFICATIONS_PATH, {
-        headers: extraHeaders,
+        headers: extraHeaders,   // Authorization est injecté par api (interceptor)
         params,
         validateStatus: () => true,
       });
       if (res.status >= 200 && res.status < 300) {
-        setItems(Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.items) ? res.data.items : []));
+        const data = Array.isArray(res.data)
+          ? res.data
+          : (Array.isArray(res.data?.items) ? res.data.items : []);
+        setItems(data);
       } else {
         console.warn("GET notifications non OK:", res.status, res.data);
         setItems([]);
@@ -64,18 +74,14 @@ export default function NotificationsList() {
     fetchAll();
   }, [period, extraHeaders]);
 
-  const canEditOrDelete = (notif) => {
-    if (!me) return false;
-    if (me.role === "superadmin") return true;
-    const myId = me.id || me._id || "";
-    return String(notif.authorId || "") === String(myId || "");
-  };
+  const myId = me?.id || me?._id || "";
+  const canEditOrDelete = (notif) =>
+    me?.role === "superadmin" || String(notif.authorId || "") === String(myId || "");
 
   const startEdit = (n) => {
     setEditId(n._id);
     setEditForm({ title: n.title || "", message: n.message || "" });
   };
-
   const cancelEdit = () => {
     setEditId(null);
     setEditForm({ title: "", message: "" });

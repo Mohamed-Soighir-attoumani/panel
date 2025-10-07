@@ -2,6 +2,8 @@
 import React, { useEffect, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
 import { PROJECTS_PATH } from "../config";
 
 export default function ProjectCreate() {

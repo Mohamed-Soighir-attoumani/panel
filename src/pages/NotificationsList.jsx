@@ -36,27 +36,35 @@ export default function NotificationsList() {
     })();
   }, []);
 
-  // Envoie x-commune-id seulement pour un ADMIN
-  const extraHeaders = useMemo(() => {
+  // 👉 Headers : on FORÇE Authorization + x-commune-id (admin)
+  const requestHeaders = useMemo(() => {
     const h = {};
-    if (me?.role === "admin" && me?.communeId) h["x-commune-id"] = me.communeId;
-    // Superadmin: ne rien envoyer → le backend renverra TOUTES les communes
+    const token = localStorage.getItem("token");
+    if (token) h["Authorization"] = `Bearer ${token}`;
+
+    if (me?.role === "admin" && me?.communeId) {
+      h["x-commune-id"] = String(me.communeId).toLowerCase().trim();
+    }
+    // superadmin : pas de x-commune-id → backend renvoie tout
     return h;
-  }, [me]);
+  }, [me?.role, me?.communeId]);
 
   const fetchAll = async () => {
     try {
       setLoading(true);
       const params = period ? { period } : {};
       const res = await api.get(NOTIFICATIONS_PATH, {
-        headers: extraHeaders,   // Authorization est injecté par api (interceptor)
+        headers: requestHeaders, // IMPORTANT: contient Authorization
         params,
         validateStatus: () => true,
       });
+
       if (res.status >= 200 && res.status < 300) {
         const data = Array.isArray(res.data)
           ? res.data
-          : (Array.isArray(res.data?.items) ? res.data.items : []);
+          : Array.isArray(res.data?.items)
+          ? res.data.items
+          : [];
         setItems(data);
       } else {
         console.warn("GET notifications non OK:", res.status, res.data);
@@ -72,7 +80,8 @@ export default function NotificationsList() {
 
   useEffect(() => {
     fetchAll();
-  }, [period, extraHeaders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, requestHeaders]);
 
   const myId = me?.id || me?._id || "";
   const canEditOrDelete = (notif) =>
@@ -90,7 +99,7 @@ export default function NotificationsList() {
   const saveEdit = async () => {
     try {
       const res = await api.patch(`${NOTIFICATIONS_PATH}/${editId}`, editForm, {
-        headers: extraHeaders,
+        headers: requestHeaders, // garde Authorization
         validateStatus: () => true,
       });
       if (res.status >= 200 && res.status < 300) {
@@ -109,7 +118,7 @@ export default function NotificationsList() {
     if (!window.confirm("Supprimer cette notification ?")) return;
     try {
       const res = await api.delete(`${NOTIFICATIONS_PATH}/${id}`, {
-        headers: extraHeaders,
+        headers: requestHeaders, // garde Authorization
         validateStatus: () => true,
       });
       if (res.status >= 200 && res.status < 300) {

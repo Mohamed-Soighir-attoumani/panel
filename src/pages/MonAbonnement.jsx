@@ -1,23 +1,40 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
-// ⚙️ Config
+/* ========================= Config & API ========================= */
 const API_URL = process.env.REACT_APP_API_URL || '';
-const getToken = () => (localStorage.getItem('token') || '').trim();
 
-// 🧩 Petits composants UI
+const api = axios.create({
+  baseURL: API_URL,
+  timeout: 20000,
+  validateStatus: (s) => s >= 200 && s < 500,
+});
+
+// injecte un token TOUJOURS frais
+api.interceptors.request.use((config) => {
+  const token = (localStorage.getItem('token') || '').trim();
+  if (token) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+/* ========================= UI Helpers ========================= */
 const Badge = ({ children, tone = 'neutral' }) => {
   const map = {
     success: 'bg-green-100 text-green-800 ring-1 ring-green-200',
     warning: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200',
-    danger: 'bg-red-100 text-red-800 ring-1 ring-red-200',
-    info: 'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
+    danger:  'bg-red-100 text-red-800 ring-1 ring-red-200',
+    info:    'bg-blue-100 text-blue-800 ring-1 ring-blue-200',
     neutral: 'bg-gray-100 text-gray-800 ring-1 ring-gray-200',
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[tone]}`}>{children}</span>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${map[tone]}`}>
+      {children}
+    </span>
   );
 };
 
@@ -25,92 +42,134 @@ const Skeleton = ({ className = '' }) => (
   <div className={`animate-pulse bg-gray-200 rounded ${className}`} />
 );
 
-// 🗂️ Utils
+/* ========================= Formatters ========================= */
+const nf = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const fmtDate = (d, withTime = false) => {
   if (!d) return '—';
-  const date = new Date(d);
-  return date.toLocaleDateString('fr-FR', withTime ? { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' } : { day: '2-digit', month: 'long', year: 'numeric' });
+  try {
+    const date = new Date(d);
+    return date.toLocaleDateString('fr-FR', withTime
+      ? { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }
+      : { day: '2-digit', month: 'long', year: 'numeric' });
+  } catch {
+    return '—';
+  }
 };
 
-const centsTo = (n) => {
-  if (n == null) return '0.00';
-  const val = Number(n);
-  return isFinite(val) ? val.toFixed(2) : '0.00';
+const fmtMoney = (amount, currency = 'EUR') => {
+  if (amount == null || Number.isNaN(Number(amount))) return `0,00 ${currency}`;
+  return `${nf.format(Number(amount))} ${currency}`;
 };
 
+/* ========================= Page ========================= */
 export default function MonAbonnement() {
-  const token = useMemo(getToken, []);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
   const [me, setMe] = useState(null);
   const [sub, setSub] = useState(null);
   const [invoices, setInvoices] = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [search, setSearch] = useState('');
+  const [actionLoading, setActionLoading] = useState({ renew: false, cancel: false });
   const isSuperadmin = me?.role === 'superadmin' || me?.isSuperadmin === true;
+  const mountedRef = useRef(true);
 
-  // 🔁 Charger les données
+  const guardAuth = useCallback((res) => {
+    if (res?.status === 401) {
+      toast.error(res.data?.message || 'Session expirée');
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('token_orig');
+        localStorage.removeItem('me');
+      } catch {}
+      setTimeout(() => (window.location.href = '/login'), 600);
+      return true;
+    }
+    if (res?.status === 403) {
+      toast.error(res.data?.message || 'Accès refusé');
+      return true;
+    }
+    return false;
+  }, []);
+
   const loadAll = useCallback(async () => {
-    if (!API_URL || !token) {
-      toast.error('Configuration manquante ou non connecté');
+    if (!API_URL) {
+      toast.error('REACT_APP_API_URL manquant');
       setLoading(false);
       return;
     }
+
+    setRefreshing(true);
+    const ctrl = new AbortController();
+
     try {
-      setRefreshing(true);
+      /* ---- 1) Profil ---- */
+      const meRes = await api.get(`/api/me`, { signal: ctrl.signal });
+      if (guardAuth(meRes)) return;
 
-      // 1) Profil (et rôle)
-      const meRes = await axios.get(`${API_URL}/api/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-        validateStatus: (s) => s >= 200 && s < 500,
-      });
-      if (meRes.status === 401) {
-        toast.error(meRes.data?.message || 'Session expirée');
-        localStorage.removeItem('token');
-        setTimeout(() => (window.location.href = '/login'), 600);
-        return;
-      }
-      setMe(meRes.data || null);
+      // backend => { user: {...} }
+      const user = meRes.data?.user || meRes.data || null;
+      setMe(user);
 
-      // 2) Abonnement
-      const subRes = await axios.get(`${API_URL}/api/my-subscription`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      /* ---- 2) Abonnement ---- */
+      const subRes = await api.get(`/api/my-subscription`, { signal: ctrl.signal });
+      if (guardAuth(subRes)) return;
       setSub(subRes.data || null);
 
-      // 3) Factures
-      const invRes = await axios.get(`${API_URL}/api/my-invoices`, {
-        headers: { Authorization: `Bearer ${token}` },
+      /* ---- 3) Factures ---- */
+      const invRes = await api.get(`/api/my-invoices`, { signal: ctrl.signal });
+      if (guardAuth(invRes)) return;
+      const list = Array.isArray(invRes.data?.invoices)
+        ? invRes.data.invoices
+        : Array.isArray(invRes.data?.items)
+        ? invRes.data.items
+        : Array.isArray(invRes.data)
+        ? invRes.data
+        : [];
+      // tri descendant par date
+      list.sort((a, b) => {
+        const ta = new Date(a?.invoiceDate || a?.createdAt || 0).getTime();
+        const tb = new Date(b?.invoiceDate || b?.createdAt || 0).getTime();
+        return tb - ta;
       });
-      const list = Array.isArray(invRes.data?.invoices) ? invRes.data.invoices : [];
       setInvoices(list);
     } catch (e) {
-      toast.error(e?.response?.data?.message || e.message || 'Erreur');
+      if (e?.name === 'CanceledError' || e?.message === 'canceled') return;
+      toast.error(e?.response?.data?.message || e?.message || 'Erreur de chargement');
     } finally {
-      setRefreshing(false);
-      setLoading(false);
+      if (mountedRef.current) {
+        setRefreshing(false);
+        setLoading(false);
+      }
     }
-  }, [token]);
+
+    return () => ctrl.abort();
+  }, [guardAuth]);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadAll();
+    return () => { mountedRef.current = false; };
   }, [loadAll]);
 
-  // ⏱️ Auto-refresh (optionnel)
+  // Auto refresh
   useEffect(() => {
     if (!autoRefresh) return;
-    const id = setInterval(loadAll, 30000);
+    const id = setInterval(() => loadAll(), 30000);
     return () => clearInterval(id);
   }, [autoRefresh, loadAll]);
 
-  // 📥 Télécharger une facture de manière sécurisée (sans exposer le token dans l'URL)
+  /* ---- Download (blob) ---- */
   const downloadInvoice = async (number) => {
     try {
-      const res = await fetch(`${API_URL}/api/my-invoices/${encodeURIComponent(number)}/pdf`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await api.get(`/api/my-invoices/${encodeURIComponent(number)}/pdf`, {
+        responseType: 'blob',
       });
-      if (!res.ok) throw new Error('Téléchargement impossible');
-      const blob = await res.blob();
+      if (guardAuth(res)) return;
+      if (res.status >= 400 || !res.data) throw new Error('Téléchargement impossible');
+
+      const blob = new Blob([res.data], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -120,47 +179,64 @@ export default function MonAbonnement() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      toast.error(e.message || 'Erreur de téléchargement');
+      toast.error(e?.message || 'Erreur de téléchargement');
     }
   };
 
-  // 🧭 Actions d'abonnement (adapter aux routes backend existantes)
+  /* ---- Actions abonnement ---- */
   const handleCancel = async () => {
     try {
-      await axios.post(`${API_URL}/api/my-subscription/cancel`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      setActionLoading((s) => ({ ...s, cancel: true }));
+      const r = await api.post(`/api/my-subscription/cancel`, {});
+      if (guardAuth(r)) return;
+      if (r.status >= 400) throw new Error(r.data?.message || 'Impossible de résilier');
       toast.success('Demande de résiliation enregistrée');
       loadAll();
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Impossible de résilier');
+      toast.error(e?.response?.data?.message || e?.message || 'Impossible de résilier');
+    } finally {
+      setActionLoading((s) => ({ ...s, cancel: false }));
     }
   };
 
   const handleRenew = async () => {
     try {
-      await axios.post(`${API_URL}/api/my-subscription/renew`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      setActionLoading((s) => ({ ...s, renew: true }));
+      const r = await api.post(`/api/my-subscription/renew`, {});
+      if (guardAuth(r)) return;
+      if (r.status >= 400) throw new Error(r.data?.message || 'Impossible de renouveler');
       toast.success('Renouvellement demandé');
       loadAll();
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Impossible de renouveler');
+      toast.error(e?.response?.data?.message || e?.message || 'Impossible de renouveler');
+    } finally {
+      setActionLoading((s) => ({ ...s, renew: false }));
     }
   };
 
-  // 🧠 Statut + tonalité
-  const statusTone = (() => {
-    if (!sub?.status) return 'neutral';
-    if (sub.status === 'active') return 'success';
-    if (sub.status === 'past_due' || sub.status === 'incomplete' || sub.status === 'canceled') return 'warning';
-    if (sub.status === 'expired') return 'danger';
+  /* ---- Dérivés ---- */
+  const statusTone = useMemo(() => {
+    const s = (sub?.status || '').toLowerCase();
+    if (!s) return 'neutral';
+    if (['active', 'trialing'].includes(s)) return 'success';
+    if (['past_due', 'incomplete', 'canceled', 'unpaid'].includes(s)) return 'warning';
+    if (['expired'].includes(s)) return 'danger';
     return 'neutral';
-  })();
+  }, [sub?.status]);
 
-  const expiresSoon = (() => {
+  const expiresSoon = useMemo(() => {
     if (!sub?.endAt) return false;
     const ms = new Date(sub.endAt).getTime() - Date.now();
-    return ms > 0 && ms < 1000 * 60 * 60 * 24 * 7; // < 7 jours
-  })();
+    return ms > 0 && ms < 7 * 24 * 60 * 60 * 1000;
+  }, [sub?.endAt]);
 
-  // 🖼️ Écrans
+  const filteredInvoices = useMemo(() => {
+    const q = (search || '').trim().toLowerCase();
+    if (!q) return invoices;
+    return invoices.filter((f) => `${f.number || ''}`.toLowerCase().includes(q));
+  }, [invoices, search]);
+
+  /* ---- Loading ---- */
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -182,8 +258,9 @@ export default function MonAbonnement() {
     );
   }
 
-  const priceLine = `${centsTo(sub?.price || 0)} ${sub?.currency || 'EUR'}` + (sub?.method ? ` — Règlement : ${sub.method}` : '');
+  const priceLine = fmtMoney(sub?.price ?? 0, sub?.currency || 'EUR') + (sub?.method ? ` — Règlement : ${sub.method}` : '');
 
+  /* ========================= Render ========================= */
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <ToastContainer />
@@ -194,17 +271,27 @@ export default function MonAbonnement() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Mon abonnement</h1>
-              <p className="text-gray-600 mt-1">Gérez votre offre, vos paiements et vos documents de facturation.</p>
+              <p className="text-gray-600 mt-1">
+                Gérez votre offre, vos paiements et vos documents de facturation.
+              </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <button
                 onClick={loadAll}
                 disabled={refreshing}
                 className="px-3 py-2 rounded border text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                 title="Actualiser"
-              >{refreshing ? 'Actualisation…' : 'Actualiser'}</button>
+                aria-busy={refreshing}
+              >
+                {refreshing ? 'Actualisation…' : 'Actualiser'}
+              </button>
               <label className="inline-flex items-center gap-2 text-sm text-gray-600">
-                <input type="checkbox" className="rounded" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                />
                 Auto-refresh
               </label>
             </div>
@@ -233,12 +320,33 @@ export default function MonAbonnement() {
             </div>
           </div>
 
-          {/* Bar d’actions abonnement */}
+          {/* Actions abonnement */}
           <div className="mt-6 flex flex-wrap gap-3">
-            <button onClick={handleRenew} className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700">Renouveler</button>
-            <button onClick={handleCancel} className="px-4 py-2 rounded border border-red-300 text-red-700 hover:bg-red-50">Résilier</button>
+            <button
+              onClick={handleRenew}
+              disabled={actionLoading.renew}
+              className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60"
+              aria-busy={actionLoading.renew}
+            >
+              {actionLoading.renew ? 'Renouvellement…' : 'Renouveler'}
+            </button>
+            <button
+              onClick={handleCancel}
+              disabled={actionLoading.cancel}
+              className="px-4 py-2 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-60"
+              aria-busy={actionLoading.cancel}
+            >
+              {actionLoading.cancel ? 'Annulation…' : 'Résilier'}
+            </button>
             {sub?.portalUrl && (
-              <a href={sub.portalUrl} target="_blank" rel="noreferrer" className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50">Gérer le moyen de paiement</a>
+              <a
+                href={sub.portalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50"
+              >
+                Gérer le moyen de paiement
+              </a>
             )}
           </div>
         </div>
@@ -269,7 +377,11 @@ export default function MonAbonnement() {
             </div>
             <div className="border rounded p-4">
               <div className="text-sm text-gray-500">Moyen de paiement</div>
-              <div className="font-medium text-gray-900">{sub?.pmBrand ? `${sub.pmBrand} •••• ${sub.pmLast4 || ''}` : (sub?.method || '—')}</div>
+              <div className="font-medium text-gray-900">
+                {sub?.pmBrand
+                  ? `${sub.pmBrand} •••• ${sub.pmLast4 || ''}`
+                  : (sub?.method || '—')}
+              </div>
             </div>
           </div>
         </div>
@@ -282,21 +394,12 @@ export default function MonAbonnement() {
               type="search"
               placeholder="Rechercher un numéro…"
               className="px-3 py-2 rounded border w-60"
-              onChange={(e) => {
-                const q = e.target.value.toLowerCase();
-                // Simple filtrage côté client
-                setInvoices((prev) => {
-                  const src = Array.isArray(prev) ? prev : [];
-                  const orig = (inv) => inv.__orig || inv; // préserve la source originelle
-                  const all = src.map((x) => orig(x));
-                  const tagged = all.map((x) => ({ ...x, __orig: x }));
-                  return !q ? all : tagged.filter((f) => `${f.number}`.toLowerCase().includes(q));
-                });
-              }}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
 
-          {(!invoices || invoices.length === 0) ? (
+          {(!filteredInvoices || filteredInvoices.length === 0) ? (
             <p className="text-gray-500">Aucune facture disponible.</p>
           ) : (
             <div className="overflow-x-auto">
@@ -311,11 +414,15 @@ export default function MonAbonnement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {invoices.map((f, i) => (
-                    <tr key={i} className="border-b last:border-0">
+                  {filteredInvoices.map((f, i) => (
+                    <tr key={`${f.number}-${i}`} className="border-b last:border-0">
                       <td className="py-2 pr-3 font-medium text-gray-900">{f.number}</td>
-                      <td className="py-2 pr-3 text-gray-700">{f.invoiceDateFormatted || fmtDate(f.invoiceDate || f.createdAt)}</td>
-                      <td className="py-2 pr-3 text-gray-700">{centsTo(f.amountTTC ?? f.amount ?? 0)} {f.currency || 'EUR'}</td>
+                      <td className="py-2 pr-3 text-gray-700">
+                        {f.invoiceDateFormatted || fmtDate(f.invoiceDate || f.createdAt)}
+                      </td>
+                      <td className="py-2 pr-3 text-gray-700">
+                        {fmtMoney(f.amountTTC ?? f.amount ?? 0, f.currency || 'EUR')}
+                      </td>
                       <td className="py-2 pr-3">
                         <Badge tone={f.status === 'paid' ? 'success' : 'warning'}>
                           {f.status === 'paid' ? 'Payée' : 'À payer'}
@@ -326,7 +433,9 @@ export default function MonAbonnement() {
                           onClick={() => downloadInvoice(f.number)}
                           className="px-3 py-1.5 rounded bg-purple-600 text-white hover:bg-purple-700"
                           title="Télécharger la facture (PDF)"
-                        >Télécharger</button>
+                        >
+                          Télécharger
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -336,7 +445,7 @@ export default function MonAbonnement() {
           )}
         </div>
 
-        {/* Zone Superadmin (visible uniquement si rôle) */}
+        {/* Outils Superadmin */}
         {isSuperadmin && (
           <div className="bg-white shadow rounded-lg p-6">
             <div className="flex items-center justify-between">
@@ -359,9 +468,15 @@ export default function MonAbonnement() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : synchroniser avec PSP')}>Synchroniser PSP</button>
-              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : appliquer geste commercial')}>Geste commercial</button>
-              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : renvoyer facture par email')}>Renvoyer facture</button>
+              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : synchroniser avec PSP')}>
+                Synchroniser PSP
+              </button>
+              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : appliquer geste commercial')}>
+                Geste commercial
+              </button>
+              <button className="px-3 py-2 rounded border hover:bg-gray-50" onClick={() => toast.info('Simulation : renvoyer facture par email')}>
+                Renvoyer facture
+              </button>
             </div>
           </div>
         )}
@@ -369,8 +484,14 @@ export default function MonAbonnement() {
         {/* Aide & conformité */}
         <div className="bg-white shadow rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-2">Aide</h2>
-          <p className="text-gray-600">Besoin d’aide ? Contactez le support à <a className="text-purple-700 underline" href="mailto:support@exemple.com">support@exemple.com</a>. Pour les demandes de facture, indiquez le numéro de facture.</p>
-          <p className="text-gray-500 text-sm mt-2">Mentions légales : les factures sont conformes aux exigences fiscales françaises. TVA intracommunautaire si applicable.</p>
+          <p className="text-gray-600">
+            Besoin d’aide ? Contactez le support à{' '}
+            <a className="text-purple-700 underline" href="mailto:support@exemple.com">support@exemple.com</a>.
+            Pour les demandes de facture, indiquez le numéro de facture.
+          </p>
+          <p className="text-gray-500 text-sm mt-2">
+            Mentions légales : les factures sont conformes aux exigences fiscales françaises. TVA intracommunautaire si applicable.
+          </p>
         </div>
       </div>
     </div>

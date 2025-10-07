@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
 import ReactQuill from "react-quill";
+// ⚠️ Garde ces deux imports ici pour garantir le rendu (certaines builds dédupliquent mal quand c'est seulement dans index)
+import "react-quill/dist/quill.core.css";
 import "react-quill/dist/quill.snow.css";
 import { PROJECTS_PATH } from "../config";
 
@@ -31,32 +33,32 @@ export default function ProjectCreate() {
 
   // ───────────────── Quill: toolbar & formats autorisés
   const toolbarId = "project-editor-toolbar";
+  const [useCustomToolbar, setUseCustomToolbar] = useState(false);
 
-  // Fallback robuste : si le noeud #toolbar n’existe pas au moment du mount,
-  // on bascule automatiquement sur la toolbar intégrée (array).
-  const quillModules = useMemo(() => {
-    const builtInToolbar = [
-      [{ header: [1, 2, 3, false] }],
-      ["bold", "italic", "underline", "strike"],
-      [{ list: "ordered" }, { list: "bullet" }],
-      [{ align: [] }],
-      [{ color: [] }, { background: [] }],
-      ["link", "clean"],
-    ];
-
-    let toolbar;
-    try {
-      const el = typeof document !== "undefined" ? document.getElementById(toolbarId) : null;
-      toolbar = el ? `#${toolbarId}` : builtInToolbar;
-    } catch {
-      toolbar = builtInToolbar;
-    }
-
-    return {
-      toolbar,
-      clipboard: { matchVisual: false },
-    };
+  // Après le 1er rendu, on vérifie que la toolbar existe bien dans le DOM
+  useEffect(() => {
+    const el = typeof document !== "undefined" ? document.getElementById(toolbarId) : null;
+    setUseCustomToolbar(!!el);
   }, []);
+
+  const quillModules = useMemo(
+    () => ({
+      // Si la toolbar #project-editor-toolbar est là, on l'utilise,
+      // sinon on bascule sur une toolbar intégrée (array) pour ne jamais se retrouver sans boutons.
+      toolbar: useCustomToolbar
+        ? `#${toolbarId}`
+        : [
+            [{ header: [1, 2, 3, false] }],
+            ["bold", "italic", "underline", "strike"],
+            [{ list: "ordered" }, { list: "bullet" }],
+            [{ align: [] }],
+            [{ color: [] }, { background: [] }],
+            ["link", "clean"],
+          ],
+      clipboard: { matchVisual: false },
+    }),
+    [useCustomToolbar]
+  );
 
   const quillFormats = [
     "header",
@@ -187,6 +189,15 @@ export default function ProjectCreate() {
 
   return (
     <div className="pt-[80px] px-6 pb-6 max-w-3xl mx-auto">
+      {/* Patch local anti-reset qui pourrait masquer la toolbar */}
+      <style>{`
+        .ql-toolbar.ql-snow .ql-formats button,
+        .ql-toolbar.ql-snow .ql-picker { display: inline-block; vertical-align: middle; }
+        .ql-snow .ql-stroke { stroke: currentColor; }
+        .ql-snow .ql-fill { fill: currentColor; }
+        .ql-container.ql-snow { border-top: 0; }
+      `}</style>
+
       <h1 className="text-2xl font-bold mb-4">Créer un projet</h1>
 
       <form onSubmit={onSubmit} className="space-y-4">
@@ -202,59 +213,56 @@ export default function ProjectCreate() {
           </div>
 
           {/* ───────── ZONE MISE EN FORME ───────── */}
-          {/* ⚠️ wrapper .ql-snow pour garantir que le thème applique bien ses styles */}
-          <div className="ql-snow">
-            {/* Toolbar personnalisée (si le hook par ID fonctionne) */}
-            <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
-              <span className="ql-formats">
-                <select className="ql-header" defaultValue="">
-                  <option value="1"></option>
-                  <option value="2"></option>
-                  <option value="3"></option>
-                  <option value=""></option>
-                </select>
-              </span>
-              <span className="ql-formats">
-                <button className="ql-bold"></button>
-                <button className="ql-italic"></button>
-                <button className="ql-underline"></button>
-                <button className="ql-strike"></button>
-              </span>
-              <span className="ql-formats">
-                <button className="ql-list" value="ordered"></button>
-                <button className="ql-list" value="bullet"></button>
-              </span>
-              <span className="ql-formats">
-                <select className="ql-align"></select>
-              </span>
-              <span className="ql-formats">
-                <select className="ql-color"></select>
-                <select className="ql-background"></select>
-              </span>
-              <span className="ql-formats">
-                <button className="ql-link"></button>
-                <button className="ql-clean"></button>
-              </span>
-            </div>
+          {/* Toolbar personnalisée : on la rend disponible, et le hook activera son usage si elle est présente */}
+          <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
+            <span className="ql-formats">
+              <select className="ql-header" defaultValue="">
+                <option value="1"></option>
+                <option value="2"></option>
+                <option value="3"></option>
+                <option value=""></option>
+              </select>
+            </span>
+            <span className="ql-formats">
+              <button className="ql-bold"></button>
+              <button className="ql-italic"></button>
+              <button className="ql-underline"></button>
+              <button className="ql-strike"></button>
+            </span>
+            <span className="ql-formats">
+              <button className="ql-list" value="ordered"></button>
+              <button className="ql-list" value="bullet"></button>
+            </span>
+            <span className="ql-formats">
+              <select className="ql-align"></select>
+            </span>
+            <span className="ql-formats">
+              <select className="ql-color"></select>
+              <select className="ql-background"></select>
+            </span>
+            <span className="ql-formats">
+              <button className="ql-link"></button>
+              <button className="ql-clean"></button>
+            </span>
+          </div>
 
-            <div className="border border-t-0 rounded-b">
-              <ReactQuill
-                theme="snow"
-                value={form.descriptionHtml}
-                onChange={(html) =>
-                  setForm((f) => ({
-                    ...f,
-                    descriptionHtml: html,
-                    // Maintien du champ texte brut pour compat
-                    description: htmlToText(html),
-                  }))
-                }
-                modules={quillModules}
-                formats={quillFormats}
-                placeholder="Décrivez votre projet (gras, italique, titres, listes, liens, couleurs...)"
-                style={{ minHeight: 180 }}
-              />
-            </div>
+          <div className="border border-t-0 rounded-b">
+            <ReactQuill
+              theme="snow"
+              value={form.descriptionHtml}
+              onChange={(html) =>
+                setForm((f) => ({
+                  ...f,
+                  descriptionHtml: html,
+                  // Maintien du champ texte brut pour compat
+                  description: htmlToText(html),
+                }))
+              }
+              modules={quillModules}
+              formats={quillFormats}
+              placeholder="Décrivez votre projet (gras, italique, titres, listes, liens, couleurs...)"
+              style={{ minHeight: 180 }}
+            />
           </div>
 
           <p className="text-xs text-gray-500 mt-1">
@@ -294,9 +302,7 @@ export default function ProjectCreate() {
             <input
               type="file"
               accept="image/*"
-              onChange={(e) =>
-                setForm({ ...form, imageFile: e.target.files?.[0] || null })
-              }
+              onChange={(e) => setForm({ ...form, imageFile: e.target.files?.[0] || null })}
             />
           </div>
         </div>

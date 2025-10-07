@@ -1,5 +1,5 @@
 // src/pages/ProjectCreate.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
 import ReactQuill from "react-quill";
@@ -13,7 +13,10 @@ export default function ProjectCreate() {
 
   const [form, setForm] = useState({
     name: "",
+    // description reste du TEXTE BRUT pour compatibilité
     description: "",
+    // ➕ nouveau: contenu HTML pour la mise en forme riche
+    descriptionHtml: "",
     imageFile: null,
   });
 
@@ -25,6 +28,30 @@ export default function ProjectCreate() {
     startAt: "",
     endAt: "",
   });
+
+  // ───────────────── Quill: toolbar & formats autorisés
+  const toolbarId = "project-editor-toolbar";
+  const quillModules = useMemo(
+    () => ({
+      toolbar: `#${toolbarId}`,
+      clipboard: { matchVisual: false },
+    }),
+    []
+  );
+
+  const quillFormats = [
+    "header",
+    "bold",
+    "italic",
+    "underline",
+    "strike",
+    "list",
+    "bullet",
+    "align",
+    "color",
+    "background",
+    "link",
+  ];
 
   useEffect(() => {
     (async () => {
@@ -63,10 +90,31 @@ export default function ProjectCreate() {
     })();
   }, []);
 
+  // Convertit HTML → texte brut (pour rester compatible avec l’ancien champ `description`)
+  const htmlToText = (html) => {
+    if (!html) return "";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    return (tmp.textContent || tmp.innerText || "").trim();
+  };
+
+  const cleanHtml = (html) => {
+    const s = String(html || "").trim();
+    // retire les contenus vides type <p><br></p> ou &nbsp;
+    const cleaned = s
+      .replace(/^<p>(<br>|&nbsp;|\s)*<\/p>$/i, "")
+      .replace(/^(<p>\s*<\/p>\s*)+$/i, "")
+      .trim();
+    return cleaned;
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.name || !form.description) {
-      alert("Nom et description requis");
+    const descHtmlClean = cleanHtml(form.descriptionHtml);
+    const descText = form.description?.trim() || htmlToText(descHtmlClean);
+
+    if (!form.name || !descHtmlClean) {
+      alert("Nom et description sont requis");
       return;
     }
     setSubmitting(true);
@@ -74,7 +122,12 @@ export default function ProjectCreate() {
     try {
       const fd = new FormData();
       fd.append("name", form.name);
-      fd.append("description", form.description);
+
+      // ⚠️ Compatibilité: on continue d'envoyer `description` (texte brut)
+      fd.append("description", descText);
+      // ➕ Nouveau: on envoie AUSSI le HTML riche
+      fd.append("descriptionHtml", descHtmlClean);
+
       if (form.imageFile) fd.append("image", form.imageFile);
 
       // Visibilité
@@ -114,7 +167,7 @@ export default function ProjectCreate() {
       }
 
       alert("Projet créé ✅");
-      setForm({ name: "", description: "", imageFile: null });
+      setForm({ name: "", description: "", descriptionHtml: "", imageFile: null });
     } catch (err) {
       console.error("Erreur création projet:", err);
       alert(
@@ -143,14 +196,96 @@ export default function ProjectCreate() {
             />
           </div>
 
+          {/* ───────── ÉDITEUR RICHE (mise en page) ───────── */}
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Description *</label>
+            <label className="block text-sm text-gray-700 mb-1">
+              Description (mise en forme) *
+            </label>
+
+            {/* Toolbar personnalisée */}
+            <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
+              <span className="ql-formats">
+                <select className="ql-header" defaultValue="">
+                  <option value="1"></option>
+                  <option value="2"></option>
+                  <option value=""></option>
+                </select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-bold"></button>
+                <button className="ql-italic"></button>
+                <button className="ql-underline"></button>
+                <button className="ql-strike"></button>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-list" value="ordered"></button>
+                <button className="ql-list" value="bullet"></button>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-align"></select>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-color"></select>
+                <select className="ql-background"></select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-link"></button>
+                <button className="ql-clean"></button>
+              </span>
+            </div>
+
+            <div className="border border-t-0 rounded-b">
+              <ReactQuill
+                theme="snow"
+                value={form.descriptionHtml}
+                onChange={(html) =>
+                  setForm((f) => ({
+                    ...f,
+                    descriptionHtml: html,
+                    // on maintient aussi la version texte brut pour compat
+                    description: htmlToText(html),
+                  }))
+                }
+                modules={quillModules}
+                formats={quillFormats}
+                placeholder="Décrivez votre projet (gras, italique, titres, listes, liens, couleurs...)"
+                style={{ minHeight: 180 }}
+              />
+            </div>
+
+            <p className="text-xs text-gray-500 mt-1">
+              Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
+              <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
+            </p>
+
+            {/* Aperçu du rendu HTML */}
+            {form.descriptionHtml?.trim() ? (
+              <div className="mt-4">
+                <div className="text-sm text-gray-500 mb-1">Aperçu :</div>
+                <div
+                  className="border rounded p-3 prose max-w-none"
+                  // si vous n’avez pas le plugin typography de Tailwind, vous pouvez enlever "prose"
+                  dangerouslySetInnerHTML={{ __html: form.descriptionHtml }}
+                />
+              </div>
+            ) : null}
+          </div>
+
+          {/* ✅ Champ d'origine conservé (texte brut) pour compatibilité/back-office/exports */}
+          <div>
+            <label className="block text-sm text-gray-700 mb-1">
+              Description (texte brut — compatibilité)
+            </label>
             <textarea
-              className="w-full border rounded px-3 py-2 min-h-[140px]"
+              className="w-full border rounded px-3 py-2 min-h-[120px]"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              required
+              placeholder="Version texte brut de la description"
             />
+            <p className="text-xs text-gray-400 mt-1">
+              Ce champ est gardé pour compatibilité (exports, anciens lecteurs). Le contenu riche est
+              envoyé dans <code>descriptionHtml</code>.
+            </p>
           </div>
 
           <div>
@@ -180,7 +315,9 @@ export default function ProjectCreate() {
           <button
             type="button"
             className="px-4 py-2 rounded border"
-            onClick={() => setForm({ name: "", description: "", imageFile: null })}
+            onClick={() =>
+              setForm({ name: "", description: "", descriptionHtml: "", imageFile: null })
+            }
           >
             Réinitialiser
           </button>

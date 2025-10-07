@@ -34,13 +34,26 @@ import Layout from "./components/Layout";
 import PrivateRoute from "./routes/PrivateRoute";
 import RequireRole from "./routes/RequireRole";
 
+/* ──────────────────────────────────────────────────────────────
+   Helper local : autoriser plusieurs rôles sans toucher RequireRole
+   ────────────────────────────────────────────────────────────── */
+const RequireAnyRole = ({ roles, children }) => {
+  try {
+    const me = JSON.parse(localStorage.getItem("me") || "null");
+    const role = me?.role;
+    if (role && roles.includes(role)) return children;
+  } catch {}
+  // si pas autorisé, on renvoie vers le dashboard (ou /)
+  return <Navigate to="/dashboard" replace />;
+};
+
 const App = () => {
   return (
     <>
       <Routes>
         {/* Routes publiques */}
         <Route path="/" element={<LoginPage />} />
-        {/* Permettre les anciens liens /login => rediriger vers / */}
+        {/* anciens liens /login => / */}
         <Route path="/login" element={<Navigate to="/" replace />} />
 
         {/* Routes privées avec Layout */}
@@ -69,42 +82,40 @@ const App = () => {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/incidents" element={<IncidentPage />} />
 
-          {/* Notifications */}
+          {/* Notifications — admin OU superadmin */}
           <Route
             path="/notifications"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <NotificationsList />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
           <Route
             path="/notifications/nouveau"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <NotificationsCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
 
           {/* Articles */}
-          {/* Liste */}
           <Route path="/articles/liste" element={<ArticleListPage />} />
-          {/* Création (deux chemins supportés) */}
           <Route
             path="/articles"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <ArticleCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
           <Route
             path="/articles/nouveau"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <ArticleCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
 
@@ -112,48 +123,46 @@ const App = () => {
           <Route
             path="/infos"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <InfosList />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
           <Route
             path="/infos/nouveau"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <InfosCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
 
           {/* Projets */}
-          {/* Liste */}
           <Route path="/projects/liste" element={<ProjectListPage />} />
-          {/* Création (deux chemins supportés) */}
           <Route
             path="/projects"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <ProjectCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
           <Route
             path="/projects/nouveau"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <ProjectCreate />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
 
-          {/* 💳 Mon Abonnement (admin et superadmin y ont accès) */}
+          {/* 💳 Mon Abonnement — admin ET superadmin (ton commentaire le dit) */}
           <Route
             path="/mon-abonnement"
             element={
-              <RequireRole role="admin">
+              <RequireAnyRole roles={['admin','superadmin']}>
                 <MonAbonnement />
-              </RequireRole>
+              </RequireAnyRole>
             }
           />
         </Route>

@@ -486,7 +486,7 @@ export default function MonAbonnement() {
           <h2 className="text-lg font-semibold text-gray-900 mb-2">Aide</h2>
           <p className="text-gray-600">
             Besoin d’aide ? Contactez le support à{' '}
-            <a className="text-purple-700 underline" href="mailto:support@exemple.com">support@exemple.com</a>.
+            <a className="text-purple-700 underline" href="mailto:contact@asso-bellevue-dembeni.yt">support@exemple.com</a>.
             Pour les demandes de facture, indiquez le numéro de facture.
           </p>
           <p className="text-gray-500 text-sm mt-2">

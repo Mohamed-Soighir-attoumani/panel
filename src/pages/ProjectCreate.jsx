@@ -13,9 +13,9 @@ export default function ProjectCreate() {
 
   const [form, setForm] = useState({
     name: "",
-    // description reste du TEXTE BRUT pour compatibilité
+    // description texte brut (compat)
     description: "",
-    // ➕ nouveau: contenu HTML pour la mise en forme riche
+    // description HTML (mise en forme)
     descriptionHtml: "",
     imageFile: null,
   });
@@ -31,13 +31,32 @@ export default function ProjectCreate() {
 
   // ───────────────── Quill: toolbar & formats autorisés
   const toolbarId = "project-editor-toolbar";
-  const quillModules = useMemo(
-    () => ({
-      toolbar: `#${toolbarId}`,
+
+  // Fallback robuste : si le noeud #toolbar n’existe pas au moment du mount,
+  // on bascule automatiquement sur la toolbar intégrée (array).
+  const quillModules = useMemo(() => {
+    const builtInToolbar = [
+      [{ header: [1, 2, 3, false] }],
+      ["bold", "italic", "underline", "strike"],
+      [{ list: "ordered" }, { list: "bullet" }],
+      [{ align: [] }],
+      [{ color: [] }, { background: [] }],
+      ["link", "clean"],
+    ];
+
+    let toolbar;
+    try {
+      const el = typeof document !== "undefined" ? document.getElementById(toolbarId) : null;
+      toolbar = el ? `#${toolbarId}` : builtInToolbar;
+    } catch {
+      toolbar = builtInToolbar;
+    }
+
+    return {
+      toolbar,
       clipboard: { matchVisual: false },
-    }),
-    []
-  );
+    };
+  }, []);
 
   const quillFormats = [
     "header",
@@ -56,7 +75,6 @@ export default function ProjectCreate() {
   useEffect(() => {
     (async () => {
       try {
-        // IMPORTANT : passer par l’instance api et préfixer /api
         const res = await api.get("/api/me", {
           validateStatus: () => true,
           timeout: 15000,
@@ -100,12 +118,10 @@ export default function ProjectCreate() {
 
   const cleanHtml = (html) => {
     const s = String(html || "").trim();
-    // retire les contenus vides type <p><br></p> ou &nbsp;
-    const cleaned = s
+    return s
       .replace(/^<p>(<br>|&nbsp;|\s)*<\/p>$/i, "")
       .replace(/^(<p>\s*<\/p>\s*)+$/i, "")
       .trim();
-    return cleaned;
   };
 
   const onSubmit = async (e) => {
@@ -123,9 +139,9 @@ export default function ProjectCreate() {
       const fd = new FormData();
       fd.append("name", form.name);
 
-      // ⚠️ Compatibilité: on continue d'envoyer `description` (texte brut)
+      // ⚠️ compat: on continue d'envoyer `description` (texte brut)
       fd.append("description", descText);
-      // ➕ Nouveau: on envoie AUSSI le HTML riche
+      // ➕ HTML riche
       fd.append("descriptionHtml", descHtmlClean);
 
       if (form.imageFile) fd.append("image", form.imageFile);
@@ -133,19 +149,13 @@ export default function ProjectCreate() {
       // Visibilité
       fd.append("visibility", visibility.visibility);
       if (visibility.communeId) fd.append("communeId", visibility.communeId);
-      if (
-        Array.isArray(visibility.audienceCommunes) &&
-        visibility.audienceCommunes.length
-      ) {
-        visibility.audienceCommunes.forEach((c) =>
-          fd.append("audienceCommunes[]", c)
-        );
+      if (Array.isArray(visibility.audienceCommunes) && visibility.audienceCommunes.length) {
+        visibility.audienceCommunes.forEach((c) => fd.append("audienceCommunes[]", c));
       }
       fd.append("priority", visibility.priority);
       if (visibility.startAt) fd.append("startAt", visibility.startAt);
       if (visibility.endAt) fd.append("endAt", visibility.endAt);
 
-      // IMPORTANT : utiliser l’instance api + la constante de chemin
       const res = await api.post(PROJECTS_PATH, fd, {
         validateStatus: () => true,
         timeout: 30000,
@@ -159,10 +169,7 @@ export default function ProjectCreate() {
       }
 
       if (res.status < 200 || res.status >= 300) {
-        const msg =
-          res?.data?.message ||
-          res?.statusText ||
-          `Erreur lors de la création (HTTP ${res.status}).`;
+        const msg = res?.data?.message || res?.statusText || `Erreur lors de la création (HTTP ${res.status}).`;
         throw new Error(msg);
       }
 
@@ -170,9 +177,7 @@ export default function ProjectCreate() {
       setForm({ name: "", description: "", descriptionHtml: "", imageFile: null });
     } catch (err) {
       console.error("Erreur création projet:", err);
-      alert(
-        err?.message || err?.response?.data?.message || "Erreur lors de la création"
-      );
+      alert(err?.message || err?.response?.data?.message || "Erreur lors de la création");
     } finally {
       setSubmitting(false);
     }
@@ -196,18 +201,16 @@ export default function ProjectCreate() {
             />
           </div>
 
-          {/* ───────── ÉDITEUR RICHE (mise en page) ───────── */}
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">
-              Description (mise en forme) *
-            </label>
-
-            {/* Toolbar personnalisée */}
+          {/* ───────── ZONE MISE EN FORME ───────── */}
+          {/* ⚠️ wrapper .ql-snow pour garantir que le thème applique bien ses styles */}
+          <div className="ql-snow">
+            {/* Toolbar personnalisée (si le hook par ID fonctionne) */}
             <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
               <span className="ql-formats">
                 <select className="ql-header" defaultValue="">
                   <option value="1"></option>
                   <option value="2"></option>
+                  <option value="3"></option>
                   <option value=""></option>
                 </select>
               </span>
@@ -242,7 +245,7 @@ export default function ProjectCreate() {
                   setForm((f) => ({
                     ...f,
                     descriptionHtml: html,
-                    // on maintient aussi la version texte brut pour compat
+                    // Maintien du champ texte brut pour compat
                     description: htmlToText(html),
                   }))
                 }
@@ -252,26 +255,25 @@ export default function ProjectCreate() {
                 style={{ minHeight: 180 }}
               />
             </div>
-
-            <p className="text-xs text-gray-500 mt-1">
-              Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
-              <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
-            </p>
-
-            {/* Aperçu du rendu HTML */}
-            {form.descriptionHtml?.trim() ? (
-              <div className="mt-4">
-                <div className="text-sm text-gray-500 mb-1">Aperçu :</div>
-                <div
-                  className="border rounded p-3 prose max-w-none"
-                  // si vous n’avez pas le plugin typography de Tailwind, vous pouvez enlever "prose"
-                  dangerouslySetInnerHTML={{ __html: form.descriptionHtml }}
-                />
-              </div>
-            ) : null}
           </div>
 
-          {/* ✅ Champ d'origine conservé (texte brut) pour compatibilité/back-office/exports */}
+          <p className="text-xs text-gray-500 mt-1">
+            Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
+            <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
+          </p>
+
+          {/* Aperçu du rendu HTML */}
+          {form.descriptionHtml?.trim() ? (
+            <div className="mt-4">
+              <div className="text-sm text-gray-500 mb-1">Aperçu :</div>
+              <div
+                className="border rounded p-3 prose max-w-none"
+                dangerouslySetInnerHTML={{ __html: form.descriptionHtml }}
+              />
+            </div>
+          ) : null}
+
+          {/* ✅ Champ d'origine conservé (texte brut) pour compatibilité */}
           <div>
             <label className="block text-sm text-gray-700 mb-1">
               Description (texte brut — compatibilité)
@@ -283,15 +285,12 @@ export default function ProjectCreate() {
               placeholder="Version texte brut de la description"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Ce champ est gardé pour compatibilité (exports, anciens lecteurs). Le contenu riche est
-              envoyé dans <code>descriptionHtml</code>.
+              Le contenu riche est envoyé dans <code>descriptionHtml</code>. Celui-ci garde la compatibilité.
             </p>
           </div>
 
           <div>
-            <label className="block text-sm text-gray-700 mb-1">
-              Image (optionnel)
-            </label>
+            <label className="block text-sm text-gray-700 mb-1">Image (optionnel)</label>
             <input
               type="file"
               accept="image/*"

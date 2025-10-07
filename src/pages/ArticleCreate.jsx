@@ -1,7 +1,9 @@
 // src/pages/ArticleCreate.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
 
 /* Helpers */
 const isHttpUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
@@ -64,6 +66,7 @@ export default function ArticleCreate() {
 
   const [form, setForm] = useState({
     title: "",
+    // ⚠️ Désormais HTML (rédigé avec l’éditeur riche)
     content: "",
     imageFile: null,
     authorName: "",
@@ -80,6 +83,36 @@ export default function ArticleCreate() {
     startAt: "",
     endAt: "",
   });
+
+  // ───────────────── Quill: toolbar & formats autorisés
+  const quillModules = useMemo(
+    () => ({
+      toolbar: [
+        [{ header: [1, 2, 3, false] }],
+        ["bold", "italic", "underline", "strike"],
+        [{ list: "ordered" }, { list: "bullet" }],
+        [{ align: [] }],
+        [{ color: [] }, { background: [] }],
+        ["link", "clean"],
+      ],
+      clipboard: { matchVisual: false },
+    }),
+    []
+  );
+
+  const quillFormats = [
+    "header",
+    "bold",
+    "italic",
+    "underline",
+    "strike",
+    "list",
+    "bullet",
+    "align",
+    "color",
+    "background",
+    "link",
+  ];
 
   useEffect(() => {
     (async () => {
@@ -129,7 +162,10 @@ export default function ArticleCreate() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title || !form.content) return alert("Titre et contenu requis");
+    // Retirer les balises vides type <p><br></p>
+    const contentClean = String(form.content || "").replace(/^<p><br><\/p>$/i, "").trim();
+
+    if (!form.title || !contentClean) return alert("Titre et contenu requis");
     if (form.sourceUrl && !isHttpUrl(form.sourceUrl)) {
       return alert("L’URL de la source doit commencer par http(s)://");
     }
@@ -138,7 +174,8 @@ export default function ArticleCreate() {
     try {
       const fd = new FormData();
       fd.append("title", form.title);
-      fd.append("content", form.content);
+      // ⬅️ On envoie bien le HTML généré par l’éditeur riche
+      fd.append("content", contentClean);
       if (form.imageFile) fd.append("image", form.imageFile);
 
       // Visibilité & planification
@@ -157,12 +194,11 @@ export default function ArticleCreate() {
       if (form.sourceUrl) fd.append("sourceUrl", form.sourceUrl);
       fd.append("status", form.status);
 
-      // ⬇️ Correction: augmente le timeout & enlève les limites de taille
       const res = await api.post(articlesPath, fd, {
         validateStatus: () => true,
-        timeout: 120000,                 // ← 120s pour laisser le temps à l’upload
-        maxContentLength: Infinity,      // ← utile si Axios limite la taille
-        maxBodyLength: Infinity,         // ← utile si Axios limite la taille
+        timeout: 120000,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -217,14 +253,26 @@ export default function ArticleCreate() {
             />
           </div>
 
+          {/* ───────── ÉDITEUR RICHE (mise en page) ───────── */}
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Contenu *</label>
-            <textarea
-              className="w-full border rounded px-3 py-2 min-h-[160px]"
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              required
-            />
+            <label className="block text-sm text-gray-700 mb-1">
+              Contenu (mise en forme) *
+            </label>
+            <div className="border rounded">
+              <ReactQuill
+                theme="snow"
+                value={form.content}
+                onChange={(html) => setForm((f) => ({ ...f, content: html }))}
+                modules={quillModules}
+                formats={quillFormats}
+                placeholder="Rédigez votre article (gras, italique, titres, listes, liens...)"
+                style={{ minHeight: 180 }}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
+              <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
+            </p>
           </div>
 
           <div>
@@ -261,7 +309,9 @@ export default function ArticleCreate() {
             </div>
 
             <div className="md:col-span-2">
-              <label className="block text-sm text-gray-700 mb-1">URL de la source (si reprise)</label>
+              <label className="block text-sm text-gray-700 mb-1">
+                URL de la source (si reprise)
+              </label>
               <input
                 className="w-full border rounded px-3 py-2"
                 value={form.sourceUrl}

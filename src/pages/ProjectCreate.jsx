@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
 import ReactQuill from "react-quill";
-// ⚠️ Garde ces deux imports ici pour garantir le rendu (certaines builds dédupliquent mal quand c'est seulement dans index)
+// ⚠️ Garde bien ces deux CSS ici pour s'assurer que le thème charge sur cette page
 import "react-quill/dist/quill.core.css";
 import "react-quill/dist/quill.snow.css";
 import { PROJECTS_PATH } from "../config";
@@ -31,33 +31,21 @@ export default function ProjectCreate() {
     endAt: "",
   });
 
-  // ───────────────── Quill: toolbar & formats autorisés
-  const toolbarId = "project-editor-toolbar";
-  const [useCustomToolbar, setUseCustomToolbar] = useState(false);
-
-  // Après le 1er rendu, on vérifie que la toolbar existe bien dans le DOM
-  useEffect(() => {
-    const el = typeof document !== "undefined" ? document.getElementById(toolbarId) : null;
-    setUseCustomToolbar(!!el);
-  }, []);
-
+  // ───────────────── Quill: toolbar & formats
+  // ✅ Utilise la toolbar intégrée (pas de #id, pas de timing DOM)
   const quillModules = useMemo(
     () => ({
-      // Si la toolbar #project-editor-toolbar est là, on l'utilise,
-      // sinon on bascule sur une toolbar intégrée (array) pour ne jamais se retrouver sans boutons.
-      toolbar: useCustomToolbar
-        ? `#${toolbarId}`
-        : [
-            [{ header: [1, 2, 3, false] }],
-            ["bold", "italic", "underline", "strike"],
-            [{ list: "ordered" }, { list: "bullet" }],
-            [{ align: [] }],
-            [{ color: [] }, { background: [] }],
-            ["link", "clean"],
-          ],
+      toolbar: [
+        [{ header: [1, 2, 3, false] }],
+        ["bold", "italic", "underline", "strike"],
+        [{ list: "ordered" }, { list: "bullet" }],
+        [{ align: [] }],
+        [{ color: [] }, { background: [] }],
+        ["link", "clean"],
+      ],
       clipboard: { matchVisual: false },
     }),
-    [useCustomToolbar]
+    []
   );
 
   const quillFormats = [
@@ -110,7 +98,7 @@ export default function ProjectCreate() {
     })();
   }, []);
 
-  // Convertit HTML → texte brut (pour rester compatible avec l’ancien champ `description`)
+  // Convertit HTML → texte brut (compat ancien champ `description`)
   const htmlToText = (html) => {
     if (!html) return "";
     const tmp = document.createElement("div");
@@ -171,7 +159,8 @@ export default function ProjectCreate() {
       }
 
       if (res.status < 200 || res.status >= 300) {
-        const msg = res?.data?.message || res?.statusText || `Erreur lors de la création (HTTP ${res.status}).`;
+        const msg =
+          res?.data?.message || res?.statusText || `Erreur lors de la création (HTTP ${res.status}).`;
         throw new Error(msg);
       }
 
@@ -212,41 +201,8 @@ export default function ProjectCreate() {
             />
           </div>
 
-          {/* ───────── ZONE MISE EN FORME ───────── */}
-          {/* Toolbar personnalisée : on la rend disponible, et le hook activera son usage si elle est présente */}
-          <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
-            <span className="ql-formats">
-              <select className="ql-header" defaultValue="">
-                <option value="1"></option>
-                <option value="2"></option>
-                <option value="3"></option>
-                <option value=""></option>
-              </select>
-            </span>
-            <span className="ql-formats">
-              <button className="ql-bold"></button>
-              <button className="ql-italic"></button>
-              <button className="ql-underline"></button>
-              <button className="ql-strike"></button>
-            </span>
-            <span className="ql-formats">
-              <button className="ql-list" value="ordered"></button>
-              <button className="ql-list" value="bullet"></button>
-            </span>
-            <span className="ql-formats">
-              <select className="ql-align"></select>
-            </span>
-            <span className="ql-formats">
-              <select className="ql-color"></select>
-              <select className="ql-background"></select>
-            </span>
-            <span className="ql-formats">
-              <button className="ql-link"></button>
-              <button className="ql-clean"></button>
-            </span>
-          </div>
-
-          <div className="border border-t-0 rounded-b">
+          {/* ───────── Zone mise en forme (toolbar intégrée) ───────── */}
+          <div className="border rounded">
             <ReactQuill
               theme="snow"
               value={form.descriptionHtml}
@@ -261,11 +217,11 @@ export default function ProjectCreate() {
               modules={quillModules}
               formats={quillFormats}
               placeholder="Décrivez votre projet (gras, italique, titres, listes, liens, couleurs...)"
-              style={{ minHeight: 180 }}
+              style={{ minHeight: 220 }}
             />
           </div>
 
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500">
             Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
             <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
           </p>

@@ -1,3 +1,4 @@
+// src/pages/NotificationsCreate.jsx
 import React, { useEffect, useState } from "react";
 import VisibilityControls from "../components/VisibilityControls";
 import api from "../api";
@@ -7,11 +8,7 @@ export default function NotificationsCreate() {
   const [me, setMe] = useState(null);
   const [loadingMe, setLoadingMe] = useState(true);
 
-  const [form, setForm] = useState({
-    title: "",
-    message: "",
-  });
-
+  const [form, setForm] = useState({ title: "", message: "" });
   const [visibility, setVisibility] = useState({
     visibility: "local",
     communeId: "",
@@ -20,17 +17,16 @@ export default function NotificationsCreate() {
     startAt: "",
     endAt: "",
   });
-
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        // IMPORTANT: passer par l’instance api et la route /api/me
         const res = await api.get("/api/me", { validateStatus: () => true, timeout: 15000 });
         if (res.status === 200) {
           const user = res?.data?.user || res?.data || null;
           setMe(user);
+          localStorage.setItem("me", JSON.stringify(user)); // ← ajoute ça
           if (user?.role === "admin") {
             setVisibility((v) => ({
               ...v,
@@ -75,7 +71,6 @@ export default function NotificationsCreate() {
         endAt: visibility.endAt || null,
       };
 
-      // IMPORTANT : utiliser l’instance api + le chemin constant
       const res = await api.post(NOTIFICATIONS_PATH, payload, {
         validateStatus: () => true,
         timeout: 20000,

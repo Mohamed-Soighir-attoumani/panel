@@ -15,19 +15,16 @@ const LS_ARTICLES_PATH = "securidem:articlesPath";
 async function resolveMePath() {
   const cached = localStorage.getItem(LS_ME_PATH);
   if (cached) return cached;
-
   const candidates = ["/api/me", "/me"];
   for (const path of candidates) {
     try {
       const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
-      // 200 ou 401/403 indiquent que la route existe bien
       if (res.status === 200 || res.status === 401 || res.status === 403) {
         localStorage.setItem(LS_ME_PATH, path);
         return path;
       }
     } catch (_) {}
   }
-  // défaut
   return "/api/me";
 }
 
@@ -35,11 +32,9 @@ async function resolveMePath() {
 async function resolveArticlesPath() {
   const cached = localStorage.getItem(LS_ARTICLES_PATH);
   if (cached) return cached;
-
   const candidates = ["/api/articles", "/articles"];
   for (const path of candidates) {
     try {
-      // GET: 200 (souvent tableau) ou 401/403 suffisent à valider le chemin
       const res = await api.get(path, { validateStatus: () => true, timeout: 12000 });
       const ok200 =
         res.status === 200 && (Array.isArray(res.data) || Array.isArray(res.data?.items));
@@ -49,7 +44,6 @@ async function resolveArticlesPath() {
       }
     } catch (_) {}
   }
-  // défaut
   return "/api/articles";
 }
 
@@ -85,16 +79,12 @@ export default function ArticleCreate() {
   });
 
   // ───────────────── Quill: toolbar & formats autorisés
+  const toolbarId = "article-editor-toolbar";
+
   const quillModules = useMemo(
     () => ({
-      toolbar: [
-        [{ header: [1, 2, 3, false] }],
-        ["bold", "italic", "underline", "strike"],
-        [{ list: "ordered" }, { list: "bullet" }],
-        [{ align: [] }],
-        [{ color: [] }, { background: [] }],
-        ["link", "clean"],
-      ],
+      // on référence la toolbar HTML ci-dessous
+      toolbar: `#${toolbarId}`,
       clipboard: { matchVisual: false },
     }),
     []
@@ -118,12 +108,10 @@ export default function ArticleCreate() {
     (async () => {
       setLoadingMe(true);
       try {
-        // 1) Résoudre dynamiquement les chemins
         const [mp, ap] = await Promise.all([resolveMePath(), resolveArticlesPath()]);
         setMePath(mp);
         setArticlesPath(ap);
 
-        // 2) Charger /me via le chemin résolu
         const res = await api.get(mp, { validateStatus: () => true, timeout: 15000 });
         if (res.status === 200) {
           const user = res.data?.user || (res.data?.role ? res.data : null);
@@ -174,8 +162,7 @@ export default function ArticleCreate() {
     try {
       const fd = new FormData();
       fd.append("title", form.title);
-      // ⬅️ On envoie bien le HTML généré par l’éditeur riche
-      fd.append("content", contentClean);
+      fd.append("content", contentClean); // ⬅️ on envoie le HTML
       if (form.imageFile) fd.append("image", form.imageFile);
 
       // Visibilité & planification
@@ -258,7 +245,40 @@ export default function ArticleCreate() {
             <label className="block text-sm text-gray-700 mb-1">
               Contenu (mise en forme) *
             </label>
-            <div className="border rounded">
+
+            {/* Toolbar personnalisée : assure l’affichage du bouton “lien” */}
+            <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
+              <span className="ql-formats">
+                <select className="ql-header" defaultValue="">
+                  <option value="1"></option>
+                  <option value="2"></option>
+                  <option value=""></option>
+                </select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-bold"></button>
+                <button className="ql-italic"></button>
+                <button className="ql-underline"></button>
+                <button className="ql-strike"></button>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-list" value="ordered"></button>
+                <button className="ql-list" value="bullet"></button>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-align"></select>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-color"></select>
+                <select className="ql-background"></select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-link"></button>
+                <button className="ql-clean"></button>
+              </span>
+            </div>
+
+            <div className="border border-t-0 rounded-b">
               <ReactQuill
                 theme="snow"
                 value={form.content}
@@ -269,10 +289,23 @@ export default function ArticleCreate() {
                 style={{ minHeight: 180 }}
               />
             </div>
+
             <p className="text-xs text-gray-500 mt-1">
               Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
               <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
             </p>
+
+            {/* Aperçu du rendu HTML */}
+            {form.content?.trim() ? (
+              <div className="mt-4">
+                <div className="text-sm text-gray-500 mb-1">Aperçu :</div>
+                <div
+                  className="border rounded p-3 prose max-w-none"
+                  // si tu n’as pas le plugin typography de Tailwind, tu peux enlever "prose"
+                  dangerouslySetInnerHTML={{ __html: form.content }}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div>

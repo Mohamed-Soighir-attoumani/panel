@@ -58,24 +58,31 @@ const isVisibleForUser = (it, me) => {
   return false;
 };
 
-/** Vrai si l'utilisateur peut éditer/supprimer l'élément */
+/** Un admin peut éditer/supprimer UNIQUEMENT ce qu'il a créé lui-même, et dans sa commune. */
 const canEditOrDelete = (it, me) => {
   if (!me) return false;
   if (me.role === "superadmin") return true;
+
   if (me.role === "admin") {
-    // Un admin ne peut modifier/supprimer QUE ce qu'il a créé lui-même
-    const isAuthor = it?.authorId && String(it.authorId) === String(me.id);
+    // Auteur : par id OU par email en fallback (selon ce que renvoie le backend)
+    const isAuthorById = it?.authorId && String(it.authorId) === String(me.id);
+    const isAuthorByEmail =
+      it?.authorEmail &&
+      me?.email &&
+      norm(it.authorEmail) === norm(me.email);
+    const isAuthor = !!(isAuthorById || isAuthorByEmail);
     if (!isAuthor) return false;
 
-    // et ne doit pas pouvoir toucher des éléments hors de son scope de commune
+    // Hors de question de toucher aux globales
     const vis = norm(it?.visibility || "local");
+    if (vis === "global") return false;
+
+    // Et seulement si c'est bien dans le scope de sa commune
     if (vis === "local") return norm(it?.communeId) === norm(me.communeId);
     if (vis === "custom") {
       const list = arrayify(it?.audienceCommunes).map(norm);
       return list.includes(norm(me.communeId));
     }
-    // vis === "global" : normalement seul superadmin en crée ; si jamais un admin en a créé -> pas d'édition
-    return false;
   }
   return false;
 };
@@ -103,8 +110,7 @@ export default function InfosList() {
     try { return JSON.parse(localStorage.getItem("me") || "null"); } catch { return null; }
   });
 
-  // ⚠️ useMemo ne "voit" pas les changements localStorage automatiquement,
-  // mais ça suffit pour notre page (on rechargera au mount/rafraîchir).
+  // ⚠️ useMemo ne réagit pas automatiquement à localStorage ; suffisant ici.
   const headers = useMemo(buildHeaders, [
     localStorage.getItem("token"),
     localStorage.getItem("me"),
@@ -141,8 +147,7 @@ export default function InfosList() {
     fetchAll();
   }, [fetchAll]);
 
-  // Filtrage strict côté client (admins ne voient jamais les autres communes,
-  // et les globales uniquement si créées par un superadmin)
+  // Filtrage strict côté client (admin = sa commune, global si superadmin)
   const items = useMemo(() => {
     if (!me) return [];
     if (me.role === "superadmin") return rawItems;
@@ -452,7 +457,7 @@ export default function InfosList() {
                         className={`px-3 py-1 rounded ${
                           editable ? "bg-red-600 text-white hover:bg-red-700" : "bg-gray-300 text-gray-600 cursor-not-allowed"
                         }`}
-                        title={editable ? "Supprimer" : "Suppression non autorisée"}
+                        title={editable ? "Suppression autorisée" : "Suppression non autorisée"}
                       >
                         🗑️ Supprimer
                       </button>

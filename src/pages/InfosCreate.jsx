@@ -1,6 +1,8 @@
 // src/pages/InfosCreate.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import ReactQuill from "react-quill";
+import "react-quill/dist/quill.snow.css";
 import VisibilityControls from "../components/VisibilityControls";
 import { API_URL } from "../config";
 
@@ -23,6 +25,21 @@ function shortMsg(str, max = 160) {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+function htmlToText(html) {
+  if (!html) return "";
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  return (tmp.textContent || tmp.innerText || "").trim();
+}
+
+function cleanHtml(html) {
+  const s = String(html || "").trim();
+  return s
+    .replace(/^<p>(<br>|&nbsp;|\s)*<\/p>$/i, "")
+    .replace(/^(<p>\s*<\/p>\s*)+$/i, "")
+    .trim();
+}
+
 // -------------------------------
 // Composant principal
 // -------------------------------
@@ -33,6 +50,9 @@ export default function InfosCreate() {
 
   const [form, setForm] = useState({
     title: "",
+    // ⚠️ on stocke le HTML pour la mise en forme
+    contentHtml: "",
+    // ✅ on garde une version texte brut pour compat (bandeau, legacy)
     content: "",
     imageFile: null,
     category: "sante",
@@ -58,6 +78,52 @@ export default function InfosCreate() {
     radiusM: 4000,       // rayon de diffusion autour du point (mètres)
   });
 
+  // ───────────────── Quill : toolbar & formats
+  const toolbarId = "infos-editor-toolbar";
+
+  // Fallback robuste : si l’élément toolbar n’existe pas lors du mount,
+  // on utilise une toolbar intégrée (array).
+  const quillModules = useMemo(() => {
+    const builtInToolbar = [
+      [{ header: [1, 2, 3, false] }],
+      ["bold", "italic", "underline", "strike"],
+      [{ list: "ordered" }, { list: "bullet" }],
+      [{ align: [] }],
+      [{ color: [] }, { background: [] }],
+      ["link", "clean"],
+    ];
+
+    let toolbar;
+    try {
+      const el =
+        typeof document !== "undefined"
+          ? document.getElementById(toolbarId)
+          : null;
+      toolbar = el ? `#${toolbarId}` : builtInToolbar;
+    } catch {
+      toolbar = builtInToolbar;
+    }
+
+    return {
+      toolbar,
+      clipboard: { matchVisual: false },
+    };
+  }, []);
+
+  const quillFormats = [
+    "header",
+    "bold",
+    "italic",
+    "underline",
+    "strike",
+    "list",
+    "bullet",
+    "align",
+    "color",
+    "background",
+    "link",
+  ];
+
   useEffect(() => {
     (async () => {
       try {
@@ -82,7 +148,6 @@ export default function InfosCreate() {
           window.location.assign("/login");
           return;
         } else {
-          // On ne déconnecte pas pour 404/500, on laisse l’utilisateur réessayer
           console.warn("GET /me non OK:", res.status, res.data);
         }
       } catch (e) {
@@ -123,10 +188,13 @@ export default function InfosCreate() {
     // Id de l'info (si renvoyé par l'API)
     const infoId = createdInfo?._id || createdInfo?.id || null;
 
+    // ⚠️ pour le bandeau, on résume la VERSION TEXTE (on strip le HTML)
+    const plain = form.content?.trim() || htmlToText(form.contentHtml);
+
     const payload = {
       severity: "critique", // bandeau rouge
       title: form.title,
-      message: shortMsg(form.content, 160),
+      message: shortMsg(plain, 160),
       startAt: startAt.toISOString(),
       endAt: endAt.toISOString(),
       area: { lat, lon, radiusM: Number(banner.radiusM) || 4000 },
@@ -149,12 +217,25 @@ export default function InfosCreate() {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title || !form.content) return alert("Titre et contenu requis");
+
+    const contentHtmlClean = cleanHtml(form.contentHtml);
+    const contentText = form.content?.trim() || htmlToText(contentHtmlClean);
+
+    if (!form.title || !contentHtmlClean) {
+      alert("Titre et contenu sont requis");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const fd = new FormData();
       fd.append("title", form.title);
-      fd.append("content", form.content);
+
+      // ⬅️ on envoie le HTML pour la mise en forme
+      fd.append("content", contentHtmlClean);
+      // ➕ on joint une version texte brut pour compat éventuelle
+      fd.append("contentText", contentText);
+
       fd.append("category", form.category);
       if (form.imageFile) fd.append("image", form.imageFile);
 
@@ -207,6 +288,7 @@ export default function InfosCreate() {
       alert("Information publiée ✅");
       setForm({
         title: "",
+        contentHtml: "",
         content: "",
         imageFile: null,
         category: "sante",
@@ -256,18 +338,76 @@ export default function InfosCreate() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-700 mb-1">Contenu *</label>
-            <textarea
-              className="w-full border rounded px-3 py-2 min-h-[160px]"
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              required
-            />
-            <p className="text-xs text-gray-500 mt-1">
-              Le bandeau (si activé) reprendra un résumé (160 caractères max).
-            </p>
+          {/* ───────── ZONE MISE EN FORME (ReactQuill) ───────── */}
+          <div className="ql-snow">
+            {/* Toolbar personnalisée (comme pour ArticleCreate) */}
+            <div id={toolbarId} className="ql-toolbar ql-snow rounded-t px-2">
+              <span className="ql-formats">
+                <select className="ql-header" defaultValue="">
+                  <option value="1"></option>
+                  <option value="2"></option>
+                  <option value="3"></option>
+                  <option value=""></option>
+                </select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-bold"></button>
+                <button className="ql-italic"></button>
+                <button className="ql-underline"></button>
+                <button className="ql-strike"></button>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-list" value="ordered"></button>
+                <button className="ql-list" value="bullet"></button>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-align"></select>
+              </span>
+              <span className="ql-formats">
+                <select className="ql-color"></select>
+                <select className="ql-background"></select>
+              </span>
+              <span className="ql-formats">
+                <button className="ql-link"></button>
+                <button className="ql-clean"></button>
+              </span>
+            </div>
+
+            <div className="border border-t-0 rounded-b">
+              <ReactQuill
+                theme="snow"
+                value={form.contentHtml}
+                onChange={(html) =>
+                  setForm((f) => ({
+                    ...f,
+                    contentHtml: html,
+                    // on garde le texte brut pour le bandeau/compat
+                    content: htmlToText(html),
+                  }))
+                }
+                modules={quillModules}
+                formats={quillFormats}
+                placeholder="Rédigez le contenu (gras, italique, titres, listes, liens, couleurs...)"
+                style={{ minHeight: 180 }}
+              />
+            </div>
           </div>
+
+          <p className="text-xs text-gray-500 mt-1">
+            Astuce : sélectionnez le texte pour appliquer <b>gras</b>, <i>italique</i>,{" "}
+            <u>souligné</u>, listes, titres, alignements, couleur, liens, etc.
+          </p>
+
+          {/* Aperçu (optionnel) */}
+          {form.contentHtml?.trim() ? (
+            <div className="mt-4">
+              <div className="text-sm text-gray-500 mb-1">Aperçu :</div>
+              <div
+                className="border rounded p-3 prose max-w-none"
+                dangerouslySetInnerHTML={{ __html: form.contentHtml }}
+              />
+            </div>
+          ) : null}
 
           <div>
             <label className="block text-sm text-gray-700 mb-1">Image (optionnel)</label>
@@ -383,6 +523,7 @@ export default function InfosCreate() {
             onClick={() =>
               setForm({
                 title: "",
+                contentHtml: "",
                 content: "",
                 imageFile: null,
                 category: "sante",

@@ -1,6 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+// src/pages/InfosList.jsx
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import axios from "axios";
 import { API_URL } from "../config";
+
+/* ------------------ helpers ------------------ */
+const norm = (v) => (v == null ? "" : String(v).trim().toLowerCase());
+const arrayify = (v) =>
+  Array.isArray(v)
+    ? v
+    : typeof v === "string"
+    ? v.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
 
 function buildHeaders() {
   const token = localStorage.getItem("token") || "";
@@ -16,8 +26,62 @@ function buildHeaders() {
   return headers;
 }
 
+/** Vrai si l'info globale est explicitement créée par un superadmin (selon champs possibles) */
+const isGlobalFromSuperadmin = (it) => {
+  const r1 = norm(it?.authorRole) === "superadmin";
+  const r2 = it?.authorIsSuperAdmin === true || it?.createdBySuperadmin === true;
+  const r3 = norm(it?.creatorRole) === "superadmin" || norm(it?.createdByRole) === "superadmin";
+  return r1 || r2 || r3;
+};
+
+/** Vrai si l'élément est visible pour l'utilisateur courant */
+const isVisibleForUser = (it, me) => {
+  if (!me) return false;
+  const meCid = norm(me.communeId);
+  const vis = norm(it?.visibility || "local");
+
+  if (me.role === "superadmin") return true;
+
+  // admins : visibilité stricte
+  if (vis === "local") {
+    return norm(it?.communeId) === meCid;
+  }
+  if (vis === "custom") {
+    const list = arrayify(it?.audienceCommunes).map(norm);
+    return list.includes(meCid);
+  }
+  if (vis === "global") {
+    // Ne montrer que si ça vient d'un superadmin
+    return isGlobalFromSuperadmin(it);
+  }
+  // fallback: rien
+  return false;
+};
+
+/** Vrai si l'utilisateur peut éditer/supprimer l'élément */
+const canEditOrDelete = (it, me) => {
+  if (!me) return false;
+  if (me.role === "superadmin") return true;
+  if (me.role === "admin") {
+    // Un admin ne peut modifier/supprimer QUE ce qu'il a créé lui-même
+    const isAuthor = it?.authorId && String(it.authorId) === String(me.id);
+    if (!isAuthor) return false;
+
+    // et ne doit pas pouvoir toucher des éléments hors de son scope de commune
+    const vis = norm(it?.visibility || "local");
+    if (vis === "local") return norm(it?.communeId) === norm(me.communeId);
+    if (vis === "custom") {
+      const list = arrayify(it?.audienceCommunes).map(norm);
+      return list.includes(norm(me.communeId));
+    }
+    // vis === "global" : normalement seul superadmin en crée ; si jamais un admin en a créé -> pas d'édition
+    return false;
+  }
+  return false;
+};
+
 export default function InfosList() {
-  const [items, setItems] = useState([]);
+  const [rawItems, setRawItems] = useState([]);
   const [period, setPeriod] = useState("");     // "", "7", "30"
   const [category, setCategory] = useState(""); // "", "sante", "proprete", "autres"
   const [loading, setLoading] = useState(true);
@@ -39,13 +103,15 @@ export default function InfosList() {
     try { return JSON.parse(localStorage.getItem("me") || "null"); } catch { return null; }
   });
 
+  // ⚠️ useMemo ne "voit" pas les changements localStorage automatiquement,
+  // mais ça suffit pour notre page (on rechargera au mount/rafraîchir).
   const headers = useMemo(buildHeaders, [
     localStorage.getItem("token"),
     localStorage.getItem("me"),
     localStorage.getItem("selectedCommuneId"),
   ]);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
       const params = {};
@@ -53,28 +119,40 @@ export default function InfosList() {
       if (category) params.category = category;
 
       const res = await axios.get(`${API_URL}/api/infos`, { headers, params });
-      setItems(Array.isArray(res.data) ? res.data : []);
+      const arr = Array.isArray(res.data) ? res.data : [];
+
+      // tri desc par date si dispo
+      arr.sort((a, b) => {
+        const ta = new Date(a?.createdAt || a?.startAt || 0).getTime();
+        const tb = new Date(b?.createdAt || b?.startAt || 0).getTime();
+        return tb - ta;
+      });
+
+      setRawItems(arr);
     } catch (e) {
       console.error("Erreur /api/infos:", e);
+      setRawItems([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [period, category, headers]);
 
   useEffect(() => {
     fetchAll();
-  }, [period, category, headers]);
+  }, [fetchAll]);
 
-  const canEdit = (it) => {
-    if (me?.role === "superadmin") return true;
-    if (me?.role === "admin") {
-      return it?.authorId && it.authorId === me?.id &&
-             (it.visibility !== "local" || it.communeId === me?.communeId);
-    }
-    return false;
-  };
+  // Filtrage strict côté client (admins ne voient jamais les autres communes,
+  // et les globales uniquement si créées par un superadmin)
+  const items = useMemo(() => {
+    if (!me) return [];
+    if (me.role === "superadmin") return rawItems;
+    return rawItems.filter((it) => isVisibleForUser(it, me));
+  }, [rawItems, me]);
 
   const startEdit = (it) => {
+    if (!canEditOrDelete(it, me)) {
+      return alert("Édition non autorisée pour cet élément.");
+    }
     setEditingId(it._id);
     setEditForm({
       title: it.title || "",
@@ -100,6 +178,12 @@ export default function InfosList() {
 
   const saveEdit = async () => {
     try {
+      const current = rawItems.find((x) => x._id === editingId);
+      if (!current) throw new Error("Élément introuvable");
+      if (!canEditOrDelete(current, me)) {
+        return alert("Modification non autorisée.");
+      }
+
       const payload = {
         title: editForm.title,
         content: editForm.content,
@@ -108,6 +192,8 @@ export default function InfosList() {
         startAt: editForm.startAt ? new Date(editForm.startAt).toISOString() : null,
         endAt:   editForm.endAt   ? new Date(editForm.endAt).toISOString()   : null,
       };
+
+      // Seul le superadmin peut changer la portée
       if (me?.role === "superadmin") {
         payload.visibility = editForm.visibility;
         if (editForm.visibility === "local") {
@@ -119,7 +205,7 @@ export default function InfosList() {
         } else if (editForm.visibility === "custom") {
           payload.communeId = "";
           payload.audienceCommunes = (editForm.audienceCommunes || "")
-            .split(",").map(s => s.trim()).filter(Boolean);
+            .split(",").map((s) => s.trim()).filter(Boolean);
         }
       }
 
@@ -133,7 +219,14 @@ export default function InfosList() {
   };
 
   const deleteItem = async (id) => {
+    const it = rawItems.find((x) => x._id === id);
+    if (!it) return;
+
+    if (!canEditOrDelete(it, me)) {
+      return alert("Suppression non autorisée pour cet élément.");
+    }
     if (!window.confirm("Supprimer cette information ?")) return;
+
     try {
       await axios.delete(`${API_URL}/api/infos/${id}`, { headers });
       if (editingId === id) cancelEdit();
@@ -173,7 +266,7 @@ export default function InfosList() {
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {items.map((it) => {
-            const editable = canEdit(it);
+            const editable = canEditOrDelete(it, me);
             const isEditing = editingId === it._id;
 
             return (
@@ -210,6 +303,12 @@ export default function InfosList() {
                       </span>
                     )}
                     {it.priority && <span className="rounded bg-gray-100 px-2 py-0.5 border">{it.priority}</span>}
+                    {/* Affiche l'auteur pour transparence (si dispo) */}
+                    {it.authorName && (
+                      <span className="rounded bg-gray-100 px-2 py-0.5 border">
+                        par {it.authorName}{it.authorRole ? ` (${it.authorRole})` : ""}
+                      </span>
+                    )}
                   </div>
                 )}
 

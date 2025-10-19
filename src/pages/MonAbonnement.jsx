@@ -277,7 +277,8 @@ export default function MonAbonnement() {
             </div>
             <div className="p-4 rounded-lg border bg-gray-50">
               <div className="text-xs uppercase text-gray-500">Début</div>
-              <div className="mt-1 text-gray-800">{fmtDate(sub?.startAt)}</div>
+              {/* 👉 Date de début d'abonnement avec heure */}
+              <div className="mt-1 text-gray-800">{fmtDate(sub?.startAt, true)}</div>
             </div>
             <div className="p-4 rounded-lg border bg-gray-50">
               <div className="text-xs uppercase text-gray-500">Fin</div>
@@ -305,7 +306,7 @@ export default function MonAbonnement() {
               <div className="font-medium text-gray-900">{me?.email || '—'}</div>
             </div>
 
-            {/* ✅ Infos de la commune ajoutées */}
+            {/* ✅ Infos de la commune */}
             <div className="border rounded p-4">
               <div className="text-sm text-gray-500">Commune (nom)</div>
               <div className="font-medium text-gray-900">{me?.communeName || '—'}</div>
@@ -359,7 +360,7 @@ export default function MonAbonnement() {
                 <thead>
                   <tr className="text-left text-gray-600 border-b">
                     <th className="py-2 pr-3">Numéro</th>
-                    <th className="py-2 pr-3">Date</th>
+                    <th className="py-2 pr-3">Date facture</th>
                     <th className="py-2 pr-3">Montant</th>
                     <th className="py-2 pr-3">Statut</th>
                     <th className="py-2 pr-3 text-right">Actions</th>
@@ -370,7 +371,8 @@ export default function MonAbonnement() {
                     <tr key={`${f.number}-${i}`} className="border-b last:border-0">
                       <td className="py-2 pr-3 font-medium text-gray-900">{f.number}</td>
                       <td className="py-2 pr-3 text-gray-700">
-                        {f.invoiceDateFormatted || fmtDate(f.invoiceDate || f.createdAt)}
+                        {/* 👉 Date de la facture avec heure */}
+                        {f.invoiceDateFormatted || fmtDate(f.invoiceDate || f.createdAt, true)}
                       </td>
                       <td className="py-2 pr-3 text-gray-700">
                         {fmtMoney(f.amountTTC ?? f.amount ?? 0, f.currency || 'EUR')}

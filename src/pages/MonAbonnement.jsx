@@ -183,37 +183,6 @@ export default function MonAbonnement() {
     }
   };
 
-  /* ---- Actions abonnement ---- */
-  const handleCancel = async () => {
-    try {
-      setActionLoading((s) => ({ ...s, cancel: true }));
-      const r = await api.post(`/api/my-subscription/cancel`, {});
-      if (guardAuth(r)) return;
-      if (r.status >= 400) throw new Error(r.data?.message || 'Impossible de résilier');
-      toast.success('Demande de résiliation enregistrée');
-      loadAll();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || e?.message || 'Impossible de résilier');
-    } finally {
-      setActionLoading((s) => ({ ...s, cancel: false }));
-    }
-  };
-
-  const handleRenew = async () => {
-    try {
-      setActionLoading((s) => ({ ...s, renew: true }));
-      const r = await api.post(`/api/my-subscription/renew`, {});
-      if (guardAuth(r)) return;
-      if (r.status >= 400) throw new Error(r.data?.message || 'Impossible de renouveler');
-      toast.success('Renouvellement demandé');
-      loadAll();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || e?.message || 'Impossible de renouveler');
-    } finally {
-      setActionLoading((s) => ({ ...s, renew: false }));
-    }
-  };
-
   /* ---- Dérivés ---- */
   const statusTone = useMemo(() => {
     const s = (sub?.status || '').toLowerCase();
@@ -320,35 +289,7 @@ export default function MonAbonnement() {
             </div>
           </div>
 
-          {/* Actions abonnement */}
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              onClick={handleRenew}
-              disabled={actionLoading.renew}
-              className="px-4 py-2 rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60"
-              aria-busy={actionLoading.renew}
-            >
-              {actionLoading.renew ? 'Renouvellement…' : 'Renouveler'}
-            </button>
-            <button
-              onClick={handleCancel}
-              disabled={actionLoading.cancel}
-              className="px-4 py-2 rounded border border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-60"
-              aria-busy={actionLoading.cancel}
-            >
-              {actionLoading.cancel ? 'Annulation…' : 'Résilier'}
-            </button>
-            {sub?.portalUrl && (
-              <a
-                href={sub.portalUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50"
-              >
-                Gérer le moyen de paiement
-              </a>
-            )}
-          </div>
+          {/* (Boutons Renouveler / Résilier supprimés comme demandé) */}
         </div>
 
         {/* Bloc identité / facturation */}
@@ -363,6 +304,17 @@ export default function MonAbonnement() {
               <div className="text-sm text-gray-500">Email</div>
               <div className="font-medium text-gray-900">{me?.email || '—'}</div>
             </div>
+
+            {/* ✅ Infos de la commune ajoutées */}
+            <div className="border rounded p-4">
+              <div className="text-sm text-gray-500">Commune (nom)</div>
+              <div className="font-medium text-gray-900">{me?.communeName || '—'}</div>
+            </div>
+            <div className="border rounded p-4">
+              <div className="text-sm text-gray-500">Commune (identifiant)</div>
+              <div className="font-medium text-gray-900">{me?.communeId || '—'}</div>
+            </div>
+
             <div className="border rounded p-4">
               <div className="text-sm text-gray-500">Entreprise</div>
               <div className="font-medium text-gray-900">{me?.company || sub?.company || '—'}</div>

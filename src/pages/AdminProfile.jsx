@@ -1,7 +1,30 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Lock, Users, Settings, LogOut, ShieldCheck, User as UserIcon, ArrowLeftCircle } from "lucide-react";
+import {
+  Lock, Users, Settings, LogOut, ShieldCheck,
+  User as UserIcon, ArrowLeftCircle
+} from "lucide-react";
+import { API_URL } from "../config"; // 🔗 on récupère l’URL de l’API
 
+/* ---------- Helpers URL / Cache ---------- */
+// Normalise l’URL de base pour servir les fichiers /uploads
+const API_ORIGIN = (API_URL || "").replace(/\/api$/, "") || window.location.origin;
+
+function absUrl(u) {
+  if (!u) return u;
+  if (/^https?:\/\//i.test(u)) return u;                 // déjà absolue
+  if (u.startsWith("//")) return window.location.protocol + u;
+  if (u.startsWith("/")) return `${API_ORIGIN}${u}`;      // ex: /uploads/avatars/...
+  return `${API_ORIGIN}/${u}`;
+}
+function withBust(url, ver) {
+  if (!url) return url;
+  const t = ver ? String(ver) : String(Date.now());
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}t=${encodeURIComponent(t)}`;
+}
+
+/* ---------- State utils ---------- */
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -15,12 +38,12 @@ async function tolerantGetMe() {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   try {
-    const r1 = await fetch("/api/me", { headers, credentials: "include" });
+    const r1 = await fetch("/api/me", { headers, credentials: "include", cache: "no-store" });
     if (r1.ok) return r1.json();
     if ([401, 403].includes(r1.status)) return { __status: r1.status };
   } catch {}
   try {
-    const r2 = await fetch("/me", { headers, credentials: "include" });
+    const r2 = await fetch("/me", { headers, credentials: "include", cache: "no-store" });
     if (r2.ok) return r2.json();
     return { __status: r2.status };
   } catch {
@@ -28,6 +51,7 @@ async function tolerantGetMe() {
   }
 }
 
+/* ---------- Avatar ---------- */
 const Avatar = ({ name, photoUrl }) => {
   const letter = (name || "").trim().charAt(0).toUpperCase() || "A";
   if (photoUrl) {
@@ -36,6 +60,7 @@ const Avatar = ({ name, photoUrl }) => {
         src={photoUrl}
         alt="avatar"
         className="h-20 w-20 rounded-full object-cover border"
+        onError={(e) => { e.currentTarget.src = "/logo192.png"; }}
       />
     );
   }
@@ -52,6 +77,15 @@ export default function AdminProfile() {
   const [me, setMe] = useState(readCachedMe());
   const [loading, setLoading] = useState(!me);
   const [error, setError] = useState("");
+
+  // Transforme l’URL photo en absolue + cache-buster
+  const photoUrl = useMemo(() => {
+    if (!me?.photo) return "";
+    // On utilise une "version" pour casser le cache : version renvoyée par l’API si dispo,
+    // sinon on tente updatedAt stocké, sinon rien (le header met aussi un cache-buster).
+    const ver = me.photoVersion || me.updatedAt || "";
+    return withBust(absUrl(me.photo), ver);
+  }, [me?.photo, me?.photoVersion, me?.updatedAt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,13 +104,14 @@ export default function AdminProfile() {
           communeName: user.communeName || "",
           name: user.name || "",
           photo: user.photo || "",
+          // 🔑 on capture une version pour le cache-busting (si le backend l’envoie)
+          photoVersion: user.photoVersion || user.logoVersion || user.updatedAt || Date.now(),
+          updatedAt: user.updatedAt || Date.now(),
           impersonated: !!user.impersonated,
           origUserId: user.origUserId || null,
         };
         setMe(normalized);
-        try {
-          localStorage.setItem("me", JSON.stringify(normalized));
-        } catch {}
+        try { localStorage.setItem("me", JSON.stringify(normalized)); } catch {}
         setError("");
       } else if (data?.__status === 401) {
         handleLogout(true);
@@ -89,7 +124,22 @@ export default function AdminProfile() {
       }
       setLoading(false);
     })();
+
     return () => { cancelled = true; };
+  }, []);
+
+  // Se synchronise si une autre page met à jour localStorage (ex: page Changer photo)
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "me" && e.newValue) {
+        try {
+          const next = JSON.parse(e.newValue);
+          setMe((prev) => ({ ...prev, ...next }));
+        } catch {}
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const handleLogout = (silent = false) => {
@@ -143,7 +193,7 @@ export default function AdminProfile() {
         )}
 
         <div className="flex flex-col items-center space-y-4 mb-6">
-          <Avatar name={me?.name || me?.email} photoUrl={me?.photo} />
+          <Avatar name={me?.name || me?.email} photoUrl={photoUrl} />
           <h2 className="text-2xl font-bold text-gray-700">
             {loading ? "Chargement…" : (me?.name || displayRole)}
           </h2>

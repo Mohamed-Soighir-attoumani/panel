@@ -7,6 +7,8 @@ import { API_URL } from '../config';
 
 // ✅ Normalise la base API (évite /api/api)
 const BASE_API = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
+// ✅ Origin de l'API (utile pour servir des fichiers quand l'URL est relative)
+const API_ORIGIN = API_URL.replace(/\/api$/, '');
 
 function decodeJwt(token) {
   try {
@@ -18,6 +20,15 @@ function decodeJwt(token) {
   }
 }
 function norm(v) { return (v || '').toString().trim().toLowerCase(); }
+
+// 🔗 force une URL absolue vers l'API si on reçoit un chemin relatif
+function absUrl(u) {
+  if (!u) return u;
+  if (/^https?:\/\//i.test(u)) return u;       // déjà absolue
+  if (u.startsWith('//')) return window.location.protocol + u;
+  if (u.startsWith('/')) return `${API_ORIGIN}${u}`;
+  return `${API_ORIGIN}/${u}`;
+}
 
 // util cache-buster (évite d’anciennes versions du logo)
 function withBust(url, ver) {
@@ -44,11 +55,9 @@ export default function Header() {
     name: '',
     communeName: '',
     communeId: '',
-    // on garde 2 champs : photo (utilisateur) + communeLogo (logo de la commune)
     photo: '',
     communeLogo: '',
     role: '',
-    // version visuelle pour bust cache après un changement
     logoVersion: '',
   });
 
@@ -88,30 +97,28 @@ export default function Header() {
         const data = await r.json().catch(() => ({}));
         const u = data?.user || {};
 
-        // ⚠️ On cherche systématiquement un logo de commune si dispo :
+        // On récupère un logo de commune si dispo, quels que soient les noms utilisés côté backend
         const communeLogo =
-          u.communeLogo ||                // si le backend renvoie déjà ce champ
-          u.logoUrl ||                    // autre nom courant
-          u.logo ||                       // autre nom
-          (u.commune && (u.commune.logo || u.commune.logoUrl)) || // dans un objet commune
-          '';                             // sinon vide
+          u.communeLogo ||
+          u.logoUrl ||
+          u.logo ||
+          (u.commune && (u.commune.logo || u.commune.logoUrl)) ||
+          '';
 
         const merged = {
           email: u.email || '',
           name: u.name || '',
           communeName: u.communeName || (u.commune && u.commune.name) || '',
-          communeId: u.communeId || (u.commune && u.commune.id) || '',
-          // photo utilisateur (avatar personnel)
+          communeId: u.communeId || (u.commune && (u.commune.id || u.commune._id)) || '',
           photo: u.photo || '',
-          // logo de la commune (prioritaire pour un admin)
           communeLogo,
           role: u.role || payload?.role || '',
-          // valeur pour buster le cache visuel après changement
-          logoVersion: u.updatedAt || u.logoUpdatedAt || '',
+          logoVersion: u.updatedAt || u.logoUpdatedAt || u.photoUpdatedAt || '',
         };
 
         setMe(merged);
-        // on persiste aussi pour la Sidebar & autres
+
+        // Persiste pour Sidebar & autres
         localStorage.setItem('admin', JSON.stringify(merged));
         localStorage.setItem('me', JSON.stringify({
           email: merged.email,
@@ -119,14 +126,12 @@ export default function Header() {
           communeName: merged.communeName,
           role: merged.role,
           communeId: merged.communeId,
-          // on stocke aussi pour les autres composants
           photo: merged.photo,
           communeLogo: merged.communeLogo,
           logoVersion: merged.logoVersion,
         }));
       })
       .catch(() => {
-        // fallback silencieux sur la dernière valeur connue
         try {
           const raw = localStorage.getItem('admin');
           if (raw) setMe(prev => ({ ...prev, ...JSON.parse(raw) }));
@@ -164,19 +169,17 @@ export default function Header() {
   const isAdmin = norm(me.role) === 'admin';
 
   // 🖼️ Avatar à afficher :
-  // 1) si admin -> on privilégie le logo de la commune
-  // 2) sinon -> la photo utilisateur
+  // 1) admin -> logo de la commune (prioritaire)
+  // 2) sinon -> photo utilisateur
   // 3) fallback -> logo par défaut
-  const rawAvatar =
-    (isAdmin && me.communeLogo) ? me.communeLogo :
-    (me.photo || '');
-  const avatarSrc = withBust(rawAvatar || '/logo192.png', me.logoVersion || '');
+  const rawAvatar = (isAdmin && me.communeLogo) ? me.communeLogo : (me.photo || '');
+  const avatarAbs = absUrl(rawAvatar); // <— corrige les URLs relatives
+  const avatarSrc = withBust(avatarAbs || '/logo192.png', me.logoVersion || '');
 
   const badgeUnderAvatar = isSuperadmin
     ? 'SUPERADMINISTRATEUR'
     : ((me.communeName || '').trim());
 
-  // Hauteur cible du header ~56px
   return (
     <>
       {/* Bannière impersonation */}
@@ -242,7 +245,10 @@ export default function Header() {
                   src={avatarSrc}
                   alt="Profil"
                   className="h-full w-full object-cover"
-                  onError={(e) => { e.currentTarget.src = '/logo192.png'; }}
+                  onError={(e) => {
+                    console.warn('Image de profil introuvable:', avatarSrc);
+                    e.currentTarget.src = '/logo192.png';
+                  }}
                 />
               </div>
 

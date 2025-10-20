@@ -1,4 +1,3 @@
-// src/components/Sidebar.jsx
 import React, { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import axios from "axios";
@@ -45,7 +44,7 @@ const Sidebar = () => {
 
     async function fetchIncidents() {
       try {
-        const headers = buildHeaders(); // relit LS à chaque tick
+        const headers = buildHeaders(); // (re)lit token + communeId à chaque tick
         const res = await axios.get(`${BASE_API}/incidents`, { headers, validateStatus: () => true });
 
         if (!mounted) return;
@@ -63,7 +62,7 @@ const Sidebar = () => {
       }
     }
 
-    // premier fetch puis polling
+    // premier fetch immédiat puis polling
     fetchIncidents();
     intervalId = setInterval(fetchIncidents, 5000);
 
@@ -71,23 +70,19 @@ const Sidebar = () => {
       mounted = false;
       clearInterval(intervalId);
     };
-  }, []);
+  }, []); // pas de dépendances: on relit LS dans buildHeaders()
 
-  // --- Classes stables, sans conflit ---
-  // Mobile (default): hidden ; si open => drawer overlay
-  // Desktop (md+): toujours visible, FIXE, sans impacter la largeur du contenu (content doit gérer son padding/margin à gauche)
-  const baseBox = "bg-gray-900 text-white";
-  const mobileClosed = "hidden md:block"; // caché en mobile, visible en md
-  const mobileOpenDrawer =
-    "block fixed top-[56px] left-0 z-[65] w-4/5 max-w-xs h-[calc(100vh-56px)] p-4 pt-6 md:hidden";
-  const desktopFixed =
-    "md:fixed md:top-[56px] md:left-0 md:z-[45] md:w-64 md:h-[calc(100vh-56px)] md:p-4 md:pt-6";
-
-  const asideClassName = [
-    baseBox,
-    open ? mobileOpenDrawer : mobileClosed,
-    desktopFixed,
-    "border-r border-gray-800", // petite bordure à droite
+  // ✅ Classes sans conflit :
+  // - Mobile: hidden (fermé) / block fixed (ouvert)
+  // - Desktop: toujours visible et FIXE sous le header (56px)
+  const asideClass = [
+    "bg-gray-900 text-white",
+    // mobile (fermé par défaut)
+    open
+      ? "block fixed top-0 left-0 z-[65] w-4/5 max-w-xs h-screen p-4 pt-6 md:hidden"
+      : "hidden md:hidden",
+    // desktop (toujours visible et fixe sous le header)
+    "md:block md:fixed md:top-[56px] md:left-0 md:z-40 md:w-64 md:h-[calc(100vh-56px)] md:p-4 md:pt-6 md:overflow-y-auto",
   ].join(" ");
 
   return (
@@ -103,16 +98,16 @@ const Sidebar = () => {
         ☰
       </button>
 
-      {/* Overlay mobile */}
+      {/* Overlay mobile (seulement sur mobile) */}
       {open && (
         <div
-          className="fixed inset-0 top-[56px] bg-black/40 z-[55] md:hidden"
+          className="fixed inset-0 bg-black/40 z-[55] md:hidden"
           onClick={() => setOpen(false)}
         />
       )}
 
-      {/* --- Sidebar --- */}
-      <aside className={asideClassName}>
+      {/* Sidebar */}
+      <aside className={asideClass}>
         {/* En-tête drawer mobile */}
         {open && (
           <div className="md:hidden flex justify-end mb-2">

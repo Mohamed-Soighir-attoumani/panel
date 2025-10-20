@@ -1,30 +1,35 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import {
-  Lock, Users, Settings, LogOut, ShieldCheck,
-  User as UserIcon, ArrowLeftCircle
-} from "lucide-react";
-import { API_URL } from "../config"; // 🔗 on récupère l’URL de l’API
+import { Lock, Users, Settings, LogOut, ShieldCheck, User as UserIcon, ArrowLeftCircle } from "lucide-react";
 
-/* ---------- Helpers URL / Cache ---------- */
-// Normalise l’URL de base pour servir les fichiers /uploads
-const API_ORIGIN = (API_URL || "").replace(/\/api$/, "") || window.location.origin;
+/* ===================== Helpers ===================== */
+
+// Base API origin à partir de l’URL courante (utile si l’API renvoie un chemin relatif)
+const API_ORIGIN = (() => {
+  try {
+    // si tu as une variable d'env, remplace ici par son origin
+    // ex: new URL(process.env.REACT_APP_API_URL).origin
+    return window.location.origin;
+  } catch {
+    return '';
+  }
+})();
 
 function absUrl(u) {
   if (!u) return u;
-  if (/^https?:\/\//i.test(u)) return u;                 // déjà absolue
-  if (u.startsWith("//")) return window.location.protocol + u;
-  if (u.startsWith("/")) return `${API_ORIGIN}${u}`;      // ex: /uploads/avatars/...
+  if (/^https?:\/\//i.test(u)) return u;        // déjà absolue
+  if (u.startsWith('//')) return `${window.location.protocol}${u}`;
+  if (u.startsWith('/')) return `${API_ORIGIN}${u}`;
   return `${API_ORIGIN}/${u}`;
 }
+
 function withBust(url, ver) {
   if (!url) return url;
   const t = ver ? String(ver) : String(Date.now());
-  const sep = url.includes("?") ? "&" : "?";
+  const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}t=${encodeURIComponent(t)}`;
 }
 
-/* ---------- State utils ---------- */
 function readCachedMe() {
   try {
     const raw = localStorage.getItem("me");
@@ -38,12 +43,12 @@ async function tolerantGetMe() {
   const token = (typeof window !== "undefined" && localStorage.getItem("token")) || "";
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   try {
-    const r1 = await fetch("/api/me", { headers, credentials: "include", cache: "no-store" });
+    const r1 = await fetch("/api/me", { headers, credentials: "include" });
     if (r1.ok) return r1.json();
     if ([401, 403].includes(r1.status)) return { __status: r1.status };
   } catch {}
   try {
-    const r2 = await fetch("/me", { headers, credentials: "include", cache: "no-store" });
+    const r2 = await fetch("/me", { headers, credentials: "include" });
     if (r2.ok) return r2.json();
     return { __status: r2.status };
   } catch {
@@ -51,19 +56,26 @@ async function tolerantGetMe() {
   }
 }
 
-/* ---------- Avatar ---------- */
-const Avatar = ({ name, photoUrl }) => {
+const Avatar = ({ name, photoUrl, version }) => {
   const letter = (name || "").trim().charAt(0).toUpperCase() || "A";
-  if (photoUrl) {
+  const src = photoUrl ? withBust(absUrl(photoUrl), version) : "";
+
+  if (src) {
     return (
       <img
-        src={photoUrl}
+        src={src}
         alt="avatar"
         className="h-20 w-20 rounded-full object-cover border"
-        onError={(e) => { e.currentTarget.src = "/logo192.png"; }}
+        onError={(e) => {
+          // Si l'image échoue, on bascule vers les initiales
+          e.currentTarget.style.display = "none";
+          const fallback = e.currentTarget.nextElementSibling;
+          if (fallback) fallback.style.display = "flex";
+        }}
       />
     );
   }
+
   return (
     <div className="h-20 w-20 rounded-full bg-blue-500 text-white flex items-center justify-center text-3xl font-bold">
       {letter}
@@ -71,21 +83,18 @@ const Avatar = ({ name, photoUrl }) => {
   );
 };
 
+/* ===================== Component ===================== */
+
 export default function AdminProfile() {
   const navigate = useNavigate();
 
-  const [me, setMe] = useState(readCachedMe());
+  const [me, setMe] = useState(() => {
+    const cached = readCachedMe();
+    // s'assure que photoVersion est présent
+    return cached ? { photoVersion: cached.photoVersion || "", ...cached } : null;
+  });
   const [loading, setLoading] = useState(!me);
   const [error, setError] = useState("");
-
-  // Transforme l’URL photo en absolue + cache-buster
-  const photoUrl = useMemo(() => {
-    if (!me?.photo) return "";
-    // On utilise une "version" pour casser le cache : version renvoyée par l’API si dispo,
-    // sinon on tente updatedAt stocké, sinon rien (le header met aussi un cache-buster).
-    const ver = me.photoVersion || me.updatedAt || "";
-    return withBust(absUrl(me.photo), ver);
-  }, [me?.photo, me?.photoVersion, me?.updatedAt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -104,14 +113,15 @@ export default function AdminProfile() {
           communeName: user.communeName || "",
           name: user.name || "",
           photo: user.photo || "",
-          // 🔑 on capture une version pour le cache-busting (si le backend l’envoie)
-          photoVersion: user.photoVersion || user.logoVersion || user.updatedAt || Date.now(),
-          updatedAt: user.updatedAt || Date.now(),
+          // version pour forcer le rafraîchissement de l'avatar
+          photoVersion: user.photoVersion || user.logoVersion || user.updatedAt || user.photoUpdatedAt || "",
           impersonated: !!user.impersonated,
           origUserId: user.origUserId || null,
         };
         setMe(normalized);
-        try { localStorage.setItem("me", JSON.stringify(normalized)); } catch {}
+        try {
+          localStorage.setItem("me", JSON.stringify(normalized));
+        } catch {}
         setError("");
       } else if (data?.__status === 401) {
         handleLogout(true);
@@ -125,21 +135,35 @@ export default function AdminProfile() {
       setLoading(false);
     })();
 
-    return () => { cancelled = true; };
-  }, []);
-
-  // Se synchronise si une autre page met à jour localStorage (ex: page Changer photo)
-  useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === "me" && e.newValue) {
+    // Si une autre page signale que la photo vient d'être changée, on se resynchronise.
+    const onPhotoUpdated = async () => {
+      const data2 = await tolerantGetMe();
+      if (data2?.user) {
+        const u = data2.user;
+        const normalized2 = {
+          id: u.id,
+          email: u.email,
+          role: u.role,
+          communeId: (u.communeId || "").toString().trim().toLowerCase(),
+          communeName: u.communeName || "",
+          name: u.name || "",
+          photo: u.photo || "",
+          photoVersion: u.photoVersion || u.logoVersion || u.updatedAt || u.photoUpdatedAt || Date.now(),
+          impersonated: !!u.impersonated,
+          origUserId: u.origUserId || null,
+        };
+        setMe(normalized2);
         try {
-          const next = JSON.parse(e.newValue);
-          setMe((prev) => ({ ...prev, ...next }));
+          localStorage.setItem("me", JSON.stringify(normalized2));
         } catch {}
       }
     };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener("profile-photo-updated", onPhotoUpdated);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("profile-photo-updated", onPhotoUpdated);
+    };
   }, []);
 
   const handleLogout = (silent = false) => {
@@ -193,7 +217,18 @@ export default function AdminProfile() {
         )}
 
         <div className="flex flex-col items-center space-y-4 mb-6">
-          <Avatar name={me?.name || me?.email} photoUrl={photoUrl} />
+          <div className="relative">
+            {/* Image (visible par défaut) */}
+            <Avatar name={me?.name || me?.email} photoUrl={me?.photo} version={me?.photoVersion} />
+            {/* Fallback initials (caché tant que l'image marche) */}
+            <div
+              style={{ display: "none" }}
+              className="h-20 w-20 rounded-full bg-blue-500 text-white items-center justify-center text-3xl font-bold"
+            >
+              {(me?.name || me?.email || "A").trim().charAt(0).toUpperCase()}
+            </div>
+          </div>
+
           <h2 className="text-2xl font-bold text-gray-700">
             {loading ? "Chargement…" : (me?.name || displayRole)}
           </h2>

@@ -1,13 +1,11 @@
 // src/components/Header.jsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { API_URL } from '../config';
 
-// ✅ Normalise la base API (évite /api/api)
 const BASE_API = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
-// ✅ Origin de l'API (utile pour servir des fichiers quand l'URL est relative)
 const API_ORIGIN = API_URL.replace(/\/api$/, '');
 
 function decodeJwt(token) {
@@ -15,22 +13,20 @@ function decodeJwt(token) {
     const base64 = token.split('.')[1] || '';
     const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
     return JSON.parse(atob(padded));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
-function norm(v) { return (v || '').toString().trim().toLowerCase(); }
+const norm = (v) => (v || '').toString().trim().toLowerCase();
 
-// 🔗 force une URL absolue vers l'API si on reçoit un chemin relatif
+// Transforme en URL absolue si besoin
 function absUrl(u) {
   if (!u) return u;
-  if (/^https?:\/\//i.test(u)) return u;       // déjà absolue
+  if (/^https?:\/\//i.test(u)) return u;
   if (u.startsWith('//')) return window.location.protocol + u;
   if (u.startsWith('/')) return `${API_ORIGIN}${u}`;
   return `${API_ORIGIN}/${u}`;
 }
 
-// util cache-buster (évite d’anciennes versions du logo)
+// Ajoute un cache-buster
 function withBust(url, ver) {
   if (!url) return url;
   const sep = url.includes('?') ? '&' : '?';
@@ -58,8 +54,65 @@ export default function Header() {
     photo: '',
     communeLogo: '',
     role: '',
-    logoVersion: '',
+    logoVersion: '',       // pour bust (photo/logo)
+    photoUpdatedAt: '',    // idem si backend le renvoie
   });
+
+  const refreshMe = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch(`${BASE_API}/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (r.status === 401 || r.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('token_orig');
+        navigate('/login', { replace: true });
+        return;
+      }
+      const data = await r.json().catch(() => ({}));
+      const u = data?.user || {};
+
+      const communeLogo =
+        u.communeLogo ||
+        u.logoUrl ||
+        u.logo ||
+        (u.commune && (u.commune.logo || u.commune.logoUrl)) ||
+        '';
+
+      const merged = {
+        email: u.email || '',
+        name: u.name || '',
+        communeName: u.communeName || (u.commune && u.commune.name) || '',
+        communeId: u.communeId || (u.commune && (u.commune.id || u.commune._id)) || '',
+        // ✅ on garde la vraie photo de l'utilisateur
+        photo: u.photo || u.photoUrl || '',
+        communeLogo,
+        role: u.role || payload?.role || '',
+        // quelque chose qui bouge quand photo/logo change
+        logoVersion: u.logoUpdatedAt || u.updatedAt || u.photoUpdatedAt || Date.now(),
+        photoUpdatedAt: u.photoUpdatedAt || '',
+      };
+
+      setMe(merged);
+
+      // Persister pour d'autres composants
+      localStorage.setItem('admin', JSON.stringify(merged));
+      localStorage.setItem('me', JSON.stringify({
+        email: merged.email,
+        name: merged.name,
+        communeName: merged.communeName,
+        role: merged.role,
+        communeId: merged.communeId,
+        photo: merged.photo,
+        communeLogo: merged.communeLogo,
+        logoVersion: merged.logoVersion,
+        photoUpdatedAt: merged.photoUpdatedAt,
+      }));
+    } catch {
+      // silence
+    }
+  }, [navigate, token, payload?.role]);
 
   const quitImpersonation = () => {
     const orig = localStorage.getItem('token_orig');
@@ -73,7 +126,7 @@ export default function Header() {
     }
   };
 
-  // Pré-hydrate avec le JWT puis va chercher /me
+  // Pré-hydrate avec JWT puis charge /me
   useEffect(() => {
     if (payload) {
       setMe(prev => ({
@@ -84,60 +137,8 @@ export default function Header() {
         communeId: payload.communeId || prev.communeId,
       }));
     }
-
-    if (!token) return;
-    fetch(`${BASE_API}/me`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(async (r) => {
-        if (r.status === 401 || r.status === 403) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('token_orig');
-          navigate('/login', { replace: true });
-          return null;
-        }
-        const data = await r.json().catch(() => ({}));
-        const u = data?.user || {};
-
-        // On récupère un logo de commune si dispo, quels que soient les noms utilisés côté backend
-        const communeLogo =
-          u.communeLogo ||
-          u.logoUrl ||
-          u.logo ||
-          (u.commune && (u.commune.logo || u.commune.logoUrl)) ||
-          '';
-
-        const merged = {
-          email: u.email || '',
-          name: u.name || '',
-          communeName: u.communeName || (u.commune && u.commune.name) || '',
-          communeId: u.communeId || (u.commune && (u.commune.id || u.commune._id)) || '',
-          photo: u.photo || '',
-          communeLogo,
-          role: u.role || payload?.role || '',
-          logoVersion: u.updatedAt || u.logoUpdatedAt || u.photoUpdatedAt || '',
-        };
-
-        setMe(merged);
-
-        // Persiste pour Sidebar & autres
-        localStorage.setItem('admin', JSON.stringify(merged));
-        localStorage.setItem('me', JSON.stringify({
-          email: merged.email,
-          name: merged.name,
-          communeName: merged.communeName,
-          role: merged.role,
-          communeId: merged.communeId,
-          photo: merged.photo,
-          communeLogo: merged.communeLogo,
-          logoVersion: merged.logoVersion,
-        }));
-      })
-      .catch(() => {
-        try {
-          const raw = localStorage.getItem('admin');
-          if (raw) setMe(prev => ({ ...prev, ...JSON.parse(raw) }));
-        } catch {}
-      });
-  }, []); // une fois au montage
+    refreshMe();
+  }, [refreshMe]); // une seule fois
 
   // Fermer le menu profil au clic hors
   useEffect(() => {
@@ -149,6 +150,24 @@ export default function Header() {
     if (profileOpen) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [profileOpen]);
+
+  // 🔁 quand un autre onglet change le localStorage (me/ photo), on refresh
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === 'me' || e.key === 'admin' || e.key === 'photoVersion') {
+        refreshMe();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [refreshMe]);
+
+  // 🔔 hook custom : si la page d’upload déclenche cet event, on refetch
+  useEffect(() => {
+    const onPhotoUpdated = () => refreshMe();
+    window.addEventListener('profile-photo-updated', onPhotoUpdated);
+    return () => window.removeEventListener('profile-photo-updated', onPhotoUpdated);
+  }, [refreshMe]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -168,13 +187,11 @@ export default function Header() {
   const isSuperadmin = norm(me.role) === 'superadmin';
   const isAdmin = norm(me.role) === 'admin';
 
-  // 🖼️ Avatar à afficher :
-  // 1) admin -> logo de la commune (prioritaire)
-  // 2) sinon -> photo utilisateur
-  // 3) fallback -> logo par défaut
-  const rawAvatar = (isAdmin && me.communeLogo) ? me.communeLogo : (me.photo || '');
-  const avatarAbs = absUrl(rawAvatar); // <— corrige les URLs relatives
-  const avatarSrc = withBust(avatarAbs || '/logo192.png', me.logoVersion || '');
+  // 🖼️ Avatar: photo utilisateur d’abord, sinon logo commune, sinon fallback
+  const preferredPhoto = me.photo && absUrl(me.photo);
+  const logoForFallback = me.communeLogo && absUrl(me.communeLogo);
+  const avatarAbs = preferredPhoto || logoForFallback || '/logo192.png';
+  const avatarSrc = withBust(avatarAbs, me.photoUpdatedAt || me.logoVersion || '');
 
   const badgeUnderAvatar = isSuperadmin
     ? 'SUPERADMINISTRATEUR'
@@ -182,7 +199,6 @@ export default function Header() {
 
   return (
     <>
-      {/* Bannière impersonation */}
       {isImpersonated && (
         <div className="w-full bg-yellow-100 text-yellow-900 text-xs sm:text-sm py-1 text-center z-50">
           Mode superadmin : vous utilisez un autre compte.
@@ -192,11 +208,9 @@ export default function Header() {
         </div>
       )}
 
-      {/* HEADER FIXE */}
       <div className="fixed w-full top-0 left-0 z-50 shadow-md">
         <header className="bg-white border-b border-gray-200 text-black">
           <div className="flex items-center justify-between px-4 sm:px-6 py-2 max-w-screen-xl mx-auto">
-            {/* Gauche : burger + Mon Abonnement (admin) */}
             <div className="flex items-center">
               <button
                 className="lg:hidden p-2 rounded hover:bg-gray-100"
@@ -208,7 +222,6 @@ export default function Header() {
 
               {isAdmin && (
                 <>
-                  {/* mobile icône seule */}
                   <Link
                     to="/mon-abonnement"
                     className="sm:hidden ml-2 p-2 rounded border border-blue-200 text-blue-700 hover:bg-blue-50"
@@ -216,7 +229,6 @@ export default function Header() {
                   >
                     💳
                   </Link>
-                  {/* ≥ sm texte */}
                   <Link
                     to="/mon-abonnement"
                     className="hidden sm:inline-flex ml-2 items-center gap-1 px-3 py-1.5 rounded-md bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
@@ -229,12 +241,10 @@ export default function Header() {
               )}
             </div>
 
-            {/* Titre centré */}
             <h1 className="absolute left-1/2 -translate-x-1/2 text-base sm:text-lg md:text-xl font-bold tracking-wide uppercase text-gray-700">
               {pageTitle}
             </h1>
 
-            {/* Droite : avatar + profil */}
             <div className="relative flex flex-col items-center leading-none">
               <div
                 onClick={() => setProfileOpen((o) => !o)}
@@ -246,7 +256,8 @@ export default function Header() {
                   alt="Profil"
                   className="h-full w-full object-cover"
                   onError={(e) => {
-                    console.warn('Image de profil introuvable:', avatarSrc);
+                    // fallback dur si l'URL renvoyée ne marche pas
+                    e.currentTarget.onerror = null;
                     e.currentTarget.src = '/logo192.png';
                   }}
                 />
@@ -258,7 +269,6 @@ export default function Header() {
                 </span>
               ) : null}
 
-              {/* Menu Profil */}
               <AnimatePresence>
                 {profileOpen && (
                   <motion.div
@@ -347,7 +357,6 @@ export default function Header() {
         </header>
       </div>
 
-      {/* Bande d’urgence FIXE sous le header (top 56px) */}
       <AnimatePresence>
         {location.pathname.startsWith('/incident') && (
           <motion.div
@@ -371,7 +380,6 @@ export default function Header() {
         )}
       </AnimatePresence>
 
-      {/* Menu mobile latéral (top 56px) */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
@@ -391,7 +399,6 @@ export default function Header() {
             <Link to="/notifications" onClick={() => setMenuOpen(false)} className="block py-2">
               🔔 Notifications
             </Link>
-            {/* ✅ routes alignées avec la sidebar */}
             <Link to="/articles/nouveau" onClick={() => setMenuOpen(false)} className="block py-2">
               📝 Créer un Article
             </Link>

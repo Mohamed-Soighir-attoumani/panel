@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu } from 'lucide-react';
-import { API_URL } from '../config'; // ✅ utilise la même source partout
+import { API_URL } from '../config';
 
 // ✅ Normalise la base API (évite /api/api)
 const BASE_API = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
@@ -11,7 +11,6 @@ const BASE_API = API_URL.endsWith('/api') ? API_URL : `${API_URL}/api`;
 function decodeJwt(token) {
   try {
     const base64 = token.split('.')[1] || '';
-    // gère le padding base64
     const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
     return JSON.parse(atob(padded));
   } catch {
@@ -19,6 +18,14 @@ function decodeJwt(token) {
   }
 }
 function norm(v) { return (v || '').toString().trim().toLowerCase(); }
+
+// util cache-buster (évite d’anciennes versions du logo)
+function withBust(url, ver) {
+  if (!url) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  const t = ver ? String(ver) : String(Date.now());
+  return `${url}${sep}t=${encodeURIComponent(t)}`;
+}
 
 export default function Header() {
   const location = useLocation();
@@ -36,8 +43,13 @@ export default function Header() {
     email: '',
     name: '',
     communeName: '',
+    communeId: '',
+    // on garde 2 champs : photo (utilisateur) + communeLogo (logo de la commune)
     photo: '',
+    communeLogo: '',
     role: '',
+    // version visuelle pour bust cache après un changement
+    logoVersion: '',
   });
 
   const quitImpersonation = () => {
@@ -60,6 +72,7 @@ export default function Header() {
         email: payload.email || prev.email,
         role: payload.role || prev.role,
         communeName: payload.communeName || prev.communeName,
+        communeId: payload.communeId || prev.communeId,
       }));
     }
 
@@ -74,20 +87,42 @@ export default function Header() {
         }
         const data = await r.json().catch(() => ({}));
         const u = data?.user || {};
+
+        // ⚠️ On cherche systématiquement un logo de commune si dispo :
+        const communeLogo =
+          u.communeLogo ||                // si le backend renvoie déjà ce champ
+          u.logoUrl ||                    // autre nom courant
+          u.logo ||                       // autre nom
+          (u.commune && (u.commune.logo || u.commune.logoUrl)) || // dans un objet commune
+          '';                             // sinon vide
+
         const merged = {
           email: u.email || '',
           name: u.name || '',
-          communeName: u.communeName || '',
+          communeName: u.communeName || (u.commune && u.commune.name) || '',
+          communeId: u.communeId || (u.commune && u.commune.id) || '',
+          // photo utilisateur (avatar personnel)
           photo: u.photo || '',
+          // logo de la commune (prioritaire pour un admin)
+          communeLogo,
           role: u.role || payload?.role || '',
+          // valeur pour buster le cache visuel après changement
+          logoVersion: u.updatedAt || u.logoUpdatedAt || '',
         };
+
         setMe(merged);
+        // on persiste aussi pour la Sidebar & autres
         localStorage.setItem('admin', JSON.stringify(merged));
-        localStorage.setItem('me', JSON.stringify({ // utile pour Sidebar, etc.
+        localStorage.setItem('me', JSON.stringify({
           email: merged.email,
-            name: merged.name,
-            communeName: merged.communeName,
-            role: merged.role,
+          name: merged.name,
+          communeName: merged.communeName,
+          role: merged.role,
+          communeId: merged.communeId,
+          // on stocke aussi pour les autres composants
+          photo: merged.photo,
+          communeLogo: merged.communeLogo,
+          logoVersion: merged.logoVersion,
         }));
       })
       .catch(() => {
@@ -127,6 +162,16 @@ export default function Header() {
 
   const isSuperadmin = norm(me.role) === 'superadmin';
   const isAdmin = norm(me.role) === 'admin';
+
+  // 🖼️ Avatar à afficher :
+  // 1) si admin -> on privilégie le logo de la commune
+  // 2) sinon -> la photo utilisateur
+  // 3) fallback -> logo par défaut
+  const rawAvatar =
+    (isAdmin && me.communeLogo) ? me.communeLogo :
+    (me.photo || '');
+  const avatarSrc = withBust(rawAvatar || '/logo192.png', me.logoVersion || '');
+
   const badgeUnderAvatar = isSuperadmin
     ? 'SUPERADMINISTRATEUR'
     : ((me.communeName || '').trim());
@@ -194,7 +239,7 @@ export default function Header() {
                 title="Profil"
               >
                 <img
-                  src={me.photo || '/logo192.png'}
+                  src={avatarSrc}
                   alt="Profil"
                   className="h-full w-full object-cover"
                   onError={(e) => { e.currentTarget.src = '/logo192.png'; }}

@@ -51,7 +51,6 @@ const Sidebar = () => {
         if (!mounted) return;
 
         if (res.status === 401 || res.status === 403) {
-          // ne casse pas la sidebar visuellement; on arrête juste le compteur
           setPendingCount(0);
           return;
         }
@@ -104,13 +103,14 @@ const Sidebar = () => {
       <aside
         className={[
           "bg-gray-900 text-white",
-          // Desktop : colonne gauche qui ne recouvre pas la page
-          // -> float-left + largeur fixe, décollée du header fixe (~56px)
-          "hidden md:block md:float-left md:w-64 md:min-h-screen md:pt-4 md:mt-[56px] md:px-4",
-          // Mobile drawer : fixe par-dessus quand ouvert
+          // Desktop : colonne gauche (ne recouvre pas la page)
+          "md:block md:float-left md:w-64 md:min-h-[calc(100vh-56px)] md:mt-[56px] md:px-4",
+          // Mobile :
+          // - fermé -> caché
+          // - ouvert -> drawer fixe scrollable (on voit toute la liste)
           open
-            ? "fixed top-0 left-0 z-[65] w-4/5 max-w-xs h-screen p-4 pt-6 md:static"
-            : ""
+            ? "fixed top-0 left-0 z-[65] w-4/5 max-w-xs h-screen overflow-y-auto p-4 pt-6 md:static"
+            : "hidden md:block"
         ].join(" ")}
       >
         {/* En-tête drawer mobile */}
@@ -128,7 +128,7 @@ const Sidebar = () => {
         )}
 
         {/* Navigation */}
-        <nav className="mt-2">
+        <nav className="mt-2 pb-8">
           <ul className="space-y-4">
             {/* Dashboard */}
             <li>
@@ -282,7 +282,7 @@ const Sidebar = () => {
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"
           rel="noopener noreferrer"
-          className="group mt-6 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-800 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
+          className="group mt-6 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-8 00 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
           onClick={() => setOpen(false)}
         >
           <p className="text-sm text-gray-300 group-hover:text-yellow-300 transition">

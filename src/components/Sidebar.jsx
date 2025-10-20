@@ -61,7 +61,6 @@ const Sidebar = () => {
           const enCours = arr.filter((i) => i.status === "En cours");
           setPendingCount(enCours.length);
         } else {
-          // autres erreurs : on ne spam pas la console
           setPendingCount(0);
         }
       } catch {
@@ -105,12 +104,12 @@ const Sidebar = () => {
       <aside
         className={[
           "bg-gray-900 text-white",
-          // Desktop
-          "hidden md:block md:w-64 md:p-4 md:pt-6",
-          // Mobile drawer
+          // Affichage mobile : visible uniquement quand open === true
           open
-            ? "fixed top-0 left-0 z-[65] w-4/5 max-w-xs h-screen p-4 pt-6"
-            : "md:static",
+            ? "block fixed top-0 left-0 z-[65] w-4/5 max-w-xs h-screen p-4 pt-6 md:hidden"
+            : "hidden md:hidden",
+          // Affichage desktop : toujours visible
+          "md:block md:static md:w-64 md:p-4 md:pt-6",
         ].join(" ")}
       >
         {/* En-tête drawer mobile */}
@@ -282,7 +281,7 @@ const Sidebar = () => {
           href="https://www.facebook.com/mohamedsoighir.attoumani"
           target="_blank"
           rel="noopener noreferrer"
-          className="group mt-6 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-800 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
+          className="group mt-6 block px-3 py-4 rounded-xl bg-gradient-to-br from-gray-8 00 via-gray-900 to-black shadow-inner border border-gray-700 text-center transition-all duration-300 hover:scale-105 hover:border-yellow-400 hover:shadow-lg"
           onClick={() => setOpen(false)}
         >
           <p className="text-sm text-gray-300 group-hover:text-yellow-300 transition">
